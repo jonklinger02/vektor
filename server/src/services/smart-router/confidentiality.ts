@@ -25,12 +25,21 @@ export function maxLevel(a: ConfidentialityLevel, b: ConfidentialityLevel): Conf
   return LEVEL_ORDER[a] >= LEVEL_ORDER[b] ? a : b;
 }
 
-/** Signals that raise a task's sensitivity. Deliberately conservative. */
+/**
+ * Signals that raise a task's sensitivity. RESTRICTED triggers only on actual
+ * secret-data SHAPES (a value being present), never on bare topic words —
+ * operational text that merely *mentions* passwords (watchdog evidence,
+ * security review issues) must not be blocked from dispatch. Topic words
+ * raise to CONFIDENTIAL instead.
+ */
 const LEVEL_PATTERNS: Array<{ level: ConfidentialityLevel; pattern: RegExp }> = [
-  // restricted: secrets, credentials, regulated personal data
-  { level: "restricted", pattern: /\b(password|api[ _-]?key|secret[ _-]?key|private[ _-]?key|credential|ssn|social security|passport number|medical record|diagnosis|patient)\b/i },
+  // restricted: an actual secret/regulated value appears in the text
+  { level: "restricted", pattern: /\b(password|api[ _-]?key|secret[ _-]?key|access[ _-]?token|credential)s?\b\s*(is|[:=])\s*["'`]?[^\s"'`]{6,}/i },
+  { level: "restricted", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
   { level: "restricted", pattern: /\b\d{3}-\d{2}-\d{4}\b/ }, // SSN shape
-  // confidential: money, legal, HR
+  { level: "restricted", pattern: /\b(?:\d[ -]?){13,16}\b(?=.*\b(card|cvv|credit)\b)/i }, // PAN + card context
+  // confidential: sensitive topics, personal/financial/legal/HR matter
+  { level: "confidential", pattern: /\b(password|api[ _-]?key|secret[ _-]?key|private[ _-]?key|credential|ssn|social security|passport number|medical record|diagnosis|patient)\b/i },
   { level: "confidential", pattern: /\b(salary|payroll|compensation|term sheet|acquisition|nda|legal hold|disciplinary|termination|severance)\b/i },
   // internal: unreleased work product
   { level: "internal", pattern: /\b(internal only|do not share|unreleased|embargo|pre[- ]?announce)\b/i },

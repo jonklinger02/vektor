@@ -21,10 +21,22 @@ afterEach(() => {
 });
 
 describe("classifyConfidentiality", () => {
-  it("classifies credential material as restricted", () => {
-    expect(classifyConfidentiality("Rotate the admin password for staging")).toBe("restricted");
-    expect(classifyConfidentiality("The vendor api key expired, generate a new one")).toBe(
+  it("classifies actual credential VALUES as restricted", () => {
+    expect(classifyConfidentiality("Deploy with password: hunter2secret on staging")).toBe(
       "restricted",
+    );
+    expect(classifyConfidentiality("The api key = sk-abc123def456 needs rotating")).toBe(
+      "restricted",
+    );
+    expect(
+      classifyConfidentiality("-----BEGIN RSA PRIVATE KEY-----\nMIIEow..."),
+    ).toBe("restricted");
+  });
+
+  it("mere MENTIONS of credentials are confidential, not restricted (operational text must stay dispatchable)", () => {
+    expect(classifyConfidentiality("Rotate the admin password for staging")).toBe("confidential");
+    expect(classifyConfidentiality("The vendor api key expired, generate a new one")).toBe(
+      "confidential",
     );
   });
 
@@ -49,7 +61,9 @@ describe("classifyConfidentiality", () => {
 
   it("never lowers a classification below what the text demands", () => {
     // restricted text + lower company default: stays restricted
-    expect(classifyConfidentiality("Store the private key safely", "internal")).toBe("restricted");
+    expect(
+      classifyConfidentiality("Customer record shows 123-45-6789 on file", "internal"),
+    ).toBe("restricted");
     // confidential text + public default: stays confidential
     expect(classifyConfidentiality("Prepare the severance package", "public")).toBe("confidential");
   });
@@ -75,7 +89,7 @@ describe("localInferenceAdapters", () => {
 describe("evaluateConfidentialityGate", () => {
   it("blocks restricted work on a hosted adapter and says the task was NOT sent", () => {
     const verdict = evaluateConfidentialityGate({
-      taskSummary: "Rotate the database password",
+      taskSummary: "Deploy with password: hunter2secret now",
       adapterType: "claude_local",
       companyDefault: "public",
       privacyMode: false,
@@ -90,7 +104,7 @@ describe("evaluateConfidentialityGate", () => {
   it("allows restricted work when the adapter is declared local via the env var", () => {
     process.env[ENV_KEY] = "opencode_local";
     const verdict = evaluateConfidentialityGate({
-      taskSummary: "Rotate the database password",
+      taskSummary: "Deploy with password: hunter2secret now",
       adapterType: "opencode_local",
       companyDefault: "public",
       privacyMode: false,
