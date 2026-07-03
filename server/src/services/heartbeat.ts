@@ -70,6 +70,8 @@ import type {
 import { createLocalAgentJwt } from "../agent-auth-jwt.js";
 import { parseObject, asBoolean, asNumber, appendWithByteCap, MAX_EXCERPT_BYTES } from "../adapters/utils.js";
 import { costService } from "./costs.js";
+import { queueRunLearningReview, recallForAgent } from "./agent-learning.js";
+import { emitRoutingDecisionAudit } from "./routing-config.js";
 import { trackAgentFirstHeartbeat } from "@paperclipai/shared/telemetry";
 import { getTelemetryClient } from "../telemetry.js";
 import { companySkillService } from "./company-skills.js";
@@ -162,6 +164,19 @@ import {
   recoveryAssigneeAdapterOverrides,
   withRecoveryModelProfileHint,
 } from "./recovery/model-profile-hint.js";
+import {
+  decideModelForDispatch,
+  type SmartRouterDecision,
+} from "./smart-router/index.js";
+import {
+  admitDispatch,
+  getCompanyHeartbeatPolicy,
+  recordDispatchAdmission,
+} from "./company-heartbeat-policy.js";
+import {
+  evaluateConfidentialityGate,
+  getCompanyConfidentiality,
+} from "./smart-router/confidentiality.js";
 import { recoveryService } from "./recovery/service.js";
 import { productivityReviewService } from "./productivity-review.js";
 import { taskWatchdogService } from "./task-watchdogs.js";
@@ -9641,8 +9656,22 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     } else {
       delete context.paperclipWakeComment;
     }
-    if (taskMarkdown) {
-      context.paperclipTaskMarkdown = taskMarkdown;
+    // Agent self-learning RECALL: inject durable learnings from prior runs
+    // into the dispatch context, and — when a task-context note exists —
+    // append them to the text the adapter actually shows the agent.
+    // Best-effort (recallForAgent never throws).
+    const agentLearningsBlock = await recallForAgent(db, agent.id);
+    if (agentLearningsBlock) {
+      context.paperclipAgentLearnings = agentLearningsBlock;
+    } else {
+      delete context.paperclipAgentLearnings;
+    }
+    const taskMarkdownWithLearnings =
+      taskMarkdown && agentLearningsBlock
+        ? `${taskMarkdown}\n\n${agentLearningsBlock}`
+        : taskMarkdown;
+    if (taskMarkdownWithLearnings) {
+      context.paperclipTaskMarkdown = taskMarkdownWithLearnings;
     } else {
       delete context.paperclipTaskMarkdown;
     }
@@ -9773,6 +9802,64 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       modelProfile: modelProfileApplication,
       issueAdapterConfig: issueAssigneeOverrides?.adapterConfig ?? null,
     });
+    // Vektor smart-router: when neither a human issue override nor a model
+    // profile chose the model, classify this task (programmatic, zero tokens)
+    // and route it to the cheapest model on this adapter that clears the task
+    // class's quality bar. Fail-open: a null decision leaves the agent's
+    // configured default exactly as it was.
+    let smartRouterDecision: SmartRouterDecision | null = null;
+    const explicitModelChosen =
+      modelProfileApplication.applied !== null ||
+      typeof (issueAssigneeOverrides?.adapterConfig ?? {}).model === "string";
+    if (!explicitModelChosen && issueContext) {
+      // Memory allocation → model-tier cost ceiling (null policy = no ceiling).
+      const heartbeatPolicy = await getCompanyHeartbeatPolicy(db, agent.companyId);
+      smartRouterDecision = await decideModelForDispatch({
+        adapterType: agent.adapterType,
+        taskSummary: `${issueContext.title ?? ""}\n${issueContext.description ?? ""}`,
+        configuredModel: typeof mergedConfig.model === "string" ? mergedConfig.model : null,
+        tierCostCeiling: heartbeatPolicy?.tierCostCeiling ?? null,
+        db,
+        companyId: agent.companyId,
+        issueId: issueContext.id,
+      });
+      if (smartRouterDecision) {
+        // Append-only decision audit (fire-and-forget; never blocks dispatch).
+        emitRoutingDecisionAudit(db, {
+          companyId: agent.companyId,
+          heartbeatRunId: run.id,
+          issueId: issueContext.id,
+          adapterType: agent.adapterType,
+          taskClass: smartRouterDecision.taskClass,
+          routingConfigVersionId: smartRouterDecision.routingConfigVersionId,
+          canaryBucket: smartRouterDecision.canaryBucket,
+          model: smartRouterDecision.model,
+          capped: smartRouterDecision.capped,
+          reasoning: smartRouterDecision.reasoning,
+        });
+        mergedConfig.model = smartRouterDecision.model;
+        context.paperclipSmartRouter = {
+          taskClass: smartRouterDecision.taskClass,
+          model: smartRouterDecision.model,
+          classificationMethod: smartRouterDecision.classificationMethod,
+          reasoning: smartRouterDecision.reasoning,
+          fallbackChain: smartRouterDecision.fallbackChain,
+        };
+        logger.info(
+          {
+            runId: run.id,
+            issueId,
+            agentId: agent.id,
+            adapterType: agent.adapterType,
+            taskClass: smartRouterDecision.taskClass,
+            model: smartRouterDecision.model,
+          },
+          "smart-router decision applied to dispatch",
+        );
+      } else {
+        delete context.paperclipSmartRouter;
+      }
+    }
     const configSnapshot = buildExecutionWorkspaceConfigSnapshot(mergedConfig, selectedEnvironmentId);
     const executionRunConfig = stripWorkspaceRuntimeFromExecutionRunConfig(mergedConfig);
     const selectedEnvironmentForConfig = selectedEnvironmentId === localEnvironment.id
@@ -11107,6 +11194,12 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         persistedRun = await classifyAndPersistRunLiveness(persistedRun, persistedResultJson) ?? persistedRun;
       }
 
+      if (outcome === "succeeded") {
+        // Agent self-learning CAPTURE: fire-and-forget review of the completed
+        // run (best-effort; can never affect run finalization).
+        queueRunLearningReview(db, run.id);
+      }
+
       await setWakeupStatus(run.wakeupRequestId, outcome === "succeeded" ? "completed" : status, {
         finishedAt: new Date(),
         error: runErrorMessage,
@@ -12346,6 +12439,57 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         scopeType: budgetBlock.scopeType,
         scopeId: budgetBlock.scopeId,
       });
+    }
+
+    // Confidentiality gate (Vektor scheme): restricted work (or a privacy-mode
+    // company) may only dispatch to local-inference adapters — defer, never
+    // degrade to a hosted provider. Applies to user-initiated wakes too: this
+    // is data protection, not capacity. The prompt has NOT been sent anywhere
+    // when this refuses.
+    if (issueId) {
+      const conf = await getCompanyConfidentiality(db, agent.companyId);
+      const issueText = await db
+        .select({ title: issues.title, description: issues.description })
+        .from(issues)
+        .where(and(eq(issues.id, issueId), eq(issues.companyId, agent.companyId)))
+        .then((rows) => rows[0] ?? null);
+      if (issueText) {
+        const verdict = evaluateConfidentialityGate({
+          taskSummary: `${issueText.title ?? ""}\n${issueText.description ?? ""}`,
+          adapterType: agent.adapterType,
+          companyDefault: conf.defaultLevel,
+          privacyMode: conf.privacyMode,
+        });
+        if (!verdict.allowed) {
+          await writeSkippedRequest("confidentiality.blocked", { error: verdict.reason });
+          throw conflict(verdict.reason, {
+            scopeType: "company",
+            scopeId: agent.companyId,
+            confidentialityLevel: verdict.level,
+          });
+        }
+      }
+    }
+
+    // Per-company heartbeat allocation (Vektor scheme): cadence + concurrency
+    // admission at the single dispatch funnel. Unconfigured companies are
+    // never gated; the check itself is fail-open. Deferred dispatches surface
+    // as skipped wakeup rows (reason "allocation.deferred") and in the
+    // scheduler_ticks telemetry. User-initiated wakes bypass the allocation —
+    // a human clicking "run" must not queue behind the machine cadence.
+    if (opts.requestedByActorType !== "user") {
+      const allocation = await admitDispatch(db, agent.companyId);
+      if (!allocation.admitted) {
+        await writeSkippedRequest("allocation.deferred", {
+          error: allocation.detail,
+        });
+        throw conflict(allocation.detail, {
+          scopeType: "company",
+          scopeId: agent.companyId,
+          allocationReason: allocation.reason,
+        });
+      }
+      await recordDispatchAdmission(db, agent.companyId);
     }
 
     const invokability = await getAgentInvokability(agent);

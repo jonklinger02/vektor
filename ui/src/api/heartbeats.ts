@@ -78,6 +78,42 @@ export interface HeartbeatRunListOptions {
   summary?: boolean;
 }
 
+export interface CompanyHeartbeatAllocationPolicy {
+  processors: number;
+  memory: number;
+  trust: number;
+  maxConcurrentRuns: number;
+  /** null when processors = 0 (Infinity does not survive JSON — dispatch is paused). */
+  dispatchMinIntervalMs: number | null;
+  /** Smart-router cost-rank ceiling (1 cheapest … 4 premium). */
+  tierCostCeiling: number;
+}
+
+export interface CompanyHeartbeatAllocation {
+  unconfigured: boolean;
+  processors: number;
+  memory: number;
+  trust: number;
+  enabled: boolean;
+  lastDispatchAt: string | null;
+  policy: CompanyHeartbeatAllocationPolicy;
+}
+
+export interface SchedulerTick {
+  id: string;
+  tickedAt: string;
+  intervalMs: number;
+  durationMs: number;
+  lapsed: boolean;
+  timersEnqueued: number;
+  routinesTriggered: number;
+  retriesPromoted: number;
+  issuesDispatched: number;
+  runsRequeued: number;
+  skippedBudget: number;
+  skippedAllocation: number;
+}
+
 export const heartbeatsApi = {
   list: (companyId: string, agentId?: string, limit?: number, options: HeartbeatRunListOptions = {}) => {
     const searchParams = new URLSearchParams();
@@ -130,4 +166,10 @@ export const heartbeatsApi = {
   },
   listInstanceSchedulerAgents: () =>
     api.get<InstanceSchedulerHeartbeatAgent[]>("/instance/scheduler-heartbeats"),
+  getAllocation: (companyId: string) =>
+    api.get<CompanyHeartbeatAllocation>(`/companies/${companyId}/heartbeat-allocation`),
+  updateAllocation: (companyId: string, input: { processors: number; memory: number }) =>
+    api.put<CompanyHeartbeatAllocationPolicy>(`/companies/${companyId}/heartbeat-allocation`, input),
+  schedulerTicks: (companyId: string, limit = 15) =>
+    api.get<SchedulerTick[]>(`/companies/${companyId}/scheduler-ticks?limit=${encodeURIComponent(String(limit))}`),
 };

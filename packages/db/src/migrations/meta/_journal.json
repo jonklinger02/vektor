@@ -897,6 +897,48 @@
       "when": 1782526500000,
       "tag": "0127_environment_custom_images_instance_scoped",
       "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1782526600000,
+      "tag": "0128_scheduler_ticks",
+      "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1782526700000,
+      "tag": "0129_company_heartbeat_allocation",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1782526800000,
+      "tag": "0130_routing_governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1782526900000,
+      "tag": "0131_company_confidentiality",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1782527000000,
+      "tag": "0132_agent_learnings",
+      "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1782527100000,
+      "tag": "0133_audit_events",
+      "breakpoints": true
     }
   ]
 }

@@ -50,6 +50,8 @@ import { DesignGuide } from "./pages/DesignGuide";
 import { InstanceGeneralSettings } from "./pages/InstanceGeneralSettings";
 import { InstanceAccess } from "./pages/InstanceAccess";
 import { InstanceSettings } from "./pages/InstanceSettings";
+import { InstanceRouting } from "./pages/InstanceRouting";
+import { CompanyAuditLog, InstanceAuditLog } from "./pages/AuditLog";
 import { InstanceExperimentalSettings } from "./pages/InstanceExperimentalSettings";
 import { ProfileSettings } from "./pages/ProfileSettings";
 import { PluginManager } from "./pages/PluginManager";
@@ -91,12 +93,15 @@ function boardRoutes() {
       <Route path="company/export/*" element={<CompanyExport />} />
       <Route path="company/import" element={<CompanyImport />} />
       <Route path="company/settings/secrets" element={<Secrets />} />
+      <Route path="company/settings/audit-log" element={<CompanyAuditLog />} />
       <Route path="company/settings/instance" element={<Navigate to="general" replace />} />
       <Route path="company/settings/instance/profile" element={<ProfileSettings />} />
       <Route path="company/settings/instance/general" element={<InstanceGeneralSettings />} />
       <Route path="company/settings/instance/environments" element={<CompanyEnvironments />} />
       <Route path="company/settings/instance/access" element={<InstanceAccess />} />
       <Route path="company/settings/instance/heartbeats" element={<InstanceSettings />} />
+      <Route path="company/settings/instance/routing" element={<InstanceRouting />} />
+      <Route path="company/settings/instance/audit-log" element={<InstanceAuditLog />} />
       <Route path="company/settings/instance/experimental" element={<InstanceExperimentalSettings />} />
       <Route path="company/settings/instance/plugins" element={<PluginManager />} />
       <Route path="company/settings/instance/plugins/:pluginId" element={<PluginSettings />} />

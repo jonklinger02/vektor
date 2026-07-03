@@ -26,6 +26,11 @@ export const companies = pgTable(
     feedbackDataSharingConsentByUserId: text("feedback_data_sharing_consent_by_user_id"),
     feedbackDataSharingTermsVersion: text("feedback_data_sharing_terms_version"),
     brandColor: text("brand_color"),
+    // Confidentiality gate (Vektor scheme, migration 0131): the floor level
+    // applied to every task's classified sensitivity, and privacy mode
+    // (company-wide local-inference-only routing).
+    defaultConfidentiality: text("default_confidentiality").notNull().default("public"),
+    privacyMode: boolean("privacy_mode").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

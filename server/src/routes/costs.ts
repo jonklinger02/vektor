@@ -20,7 +20,8 @@ import {
   accessService,
   logActivity,
 } from "../services/index.js";
-import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
+import { assertBoard, assertCompanyAccess, getActorInfo, requireCompanyRole } from "./authz.js";
+import { emitAuditEvent } from "../services/audit-events.js";
 import { fetchAllQuotaWindows } from "../services/quota-windows.js";
 import { badRequest } from "../errors.js";
 import type { PluginWorkerManager } from "../services/plugin-worker-manager.js";
@@ -304,7 +305,22 @@ export function costRoutes(
       assertBoard(req);
       const companyId = req.params.companyId as string;
       assertCompanyAccess(req, companyId);
+      requireCompanyRole(req, companyId, "admin");
       const summary = await budgets.upsertPolicy(companyId, req.body, req.actor.userId ?? "board");
+      emitAuditEvent(db, {
+        companyId,
+        actorUserId: req.actor.userId ?? null,
+        actorType: "user",
+        action: "budget.policy_changed",
+        subjectType: "budget_policy",
+        subjectId: `${req.body.scopeType}:${req.body.scopeId}`,
+        details: {
+          scopeType: req.body.scopeType,
+          scopeId: req.body.scopeId,
+          amount: req.body.amount,
+          windowKind: req.body.windowKind,
+        },
+      });
       res.json(summary);
     },
   );
@@ -335,12 +351,22 @@ export function costRoutes(
     assertBoard(req);
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
+    requireCompanyRole(req, companyId, "admin");
     const company = await companies.update(companyId, { budgetMonthlyCents: req.body.budgetMonthlyCents });
     if (!company) {
       res.status(404).json({ error: "Company not found" });
       return;
     }
 
+    emitAuditEvent(db, {
+      companyId,
+      actorUserId: req.actor.userId ?? null,
+      actorType: "user",
+      action: "budget.policy_changed",
+      subjectType: "company",
+      subjectId: companyId,
+      details: { budgetMonthlyCents: req.body.budgetMonthlyCents },
+    });
     await logActivity(db, {
       companyId,
       actorType: "user",
@@ -375,6 +401,7 @@ export function costRoutes(
 
     assertCompanyAccess(req, agent.companyId);
     assertBoard(req);
+    requireCompanyRole(req, agent.companyId, "admin");
 
     const updated = await agents.update(agentId, { budgetMonthlyCents: req.body.budgetMonthlyCents });
     if (!updated) {
@@ -383,6 +410,15 @@ export function costRoutes(
     }
 
     const actor = getActorInfo(req);
+    emitAuditEvent(db, {
+      companyId: updated.companyId,
+      actorUserId: actor.actorType === "user" ? actor.actorId : null,
+      actorType: actor.actorType,
+      action: "budget.policy_changed",
+      subjectType: "agent",
+      subjectId: updated.id,
+      details: { budgetMonthlyCents: updated.budgetMonthlyCents },
+    });
     await logActivity(db, {
       companyId: updated.companyId,
       actorType: actor.actorType,

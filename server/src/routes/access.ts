@@ -72,6 +72,7 @@ import {
   resolveHumanInviteRole,
 } from "../services/company-member-roles.js";
 import { humanJoinGrantsFromDefaults } from "../services/invite-grants.js";
+import { emitAuditEvent } from "../services/audit-events.js";
 import {
   collapseDuplicatePendingHumanJoinRequests,
   findReusableHumanJoinRequest,
@@ -4487,6 +4488,20 @@ export function accessRoutes(
       });
       if (!updated) throw notFound("Member not found");
 
+      emitAuditEvent(db, {
+        companyId,
+        actorUserId: req.actor.userId ?? null,
+        actorType: "user",
+        action: "company.role_changed",
+        subjectType: "company_membership",
+        subjectId: memberId,
+        details: {
+          principalType: updated.principalType,
+          principalId: updated.principalId,
+          membershipRole: updated.membershipRole,
+          status: updated.status,
+        },
+      });
       await logActivity(db, {
         companyId,
         actorType: "user",
@@ -4613,6 +4628,21 @@ export function accessRoutes(
       });
       if (!updated) throw notFound("Member not found");
 
+      emitAuditEvent(db, {
+        companyId,
+        actorUserId: req.actor.userId ?? null,
+        actorType: "user",
+        action: "company.role_changed",
+        subjectType: "company_membership",
+        subjectId: memberId,
+        details: {
+          principalType: updated.principalType,
+          principalId: updated.principalId,
+          membershipRole: updated.membershipRole,
+          status: updated.status,
+          grantCount: req.body.grants?.length ?? 0,
+        },
+      });
       await logActivity(db, {
         companyId,
         actorType: "user",

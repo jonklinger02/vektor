@@ -74,6 +74,52 @@ export function assertCompanyAccess(req: Request, companyId: string) {
   }
 }
 
+/**
+ * Company role ladder: owner > admin > operator (legacy "member") > viewer.
+ * Mirrors normalizeHumanRole in services/company-member-roles.ts: an unknown
+ * or missing role counts as "operator".
+ */
+export function companyRoleRank(role: string | null | undefined): number {
+  switch (role) {
+    case "viewer":
+      return 0;
+    case "admin":
+      return 2;
+    case "owner":
+      return 3;
+    default:
+      return 1;
+  }
+}
+
+/**
+ * Require at least `minRole` on the company for signed-in board users.
+ * Instance admins and the local implicit board bypass, and key-based board
+ * actors without membership details keep assertCompanyAccess as their guard
+ * (same stance assertCompanyAccess itself takes). Call this *in addition to*
+ * assertCompanyAccess, never instead of it.
+ */
+export function requireCompanyRole(
+  req: Request,
+  companyId: string,
+  minRole: "operator" | "admin" | "owner",
+) {
+  assertBoard(req);
+  if (req.actor.source === "local_implicit" || req.actor.isInstanceAdmin) {
+    return;
+  }
+  if (!Array.isArray(req.actor.memberships)) {
+    return;
+  }
+  const membership = req.actor.memberships.find((item) => item.companyId === companyId);
+  if (!membership || membership.status !== "active") {
+    throw forbidden("Active company membership required");
+  }
+  if (companyRoleRank(membership.membershipRole) < companyRoleRank(minRole)) {
+    throw forbidden(`Company role '${minRole}' or higher required`);
+  }
+}
+
 export function getActorInfo(req: Request): (
   {
     actorType: "agent";

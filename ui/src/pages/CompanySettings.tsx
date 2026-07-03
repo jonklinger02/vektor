@@ -6,7 +6,7 @@ import {
 } from "@paperclipai/shared";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
-import { companiesApi } from "../api/companies";
+import { companiesApi, type CompanyConfidentialityLevel } from "../api/companies";
 import { assetsApi } from "../api/assets";
 import { instanceSettingsApi } from "../api/instanceSettings";
 import { queryKeys } from "../lib/queryKeys";
@@ -21,6 +21,33 @@ import {
 const BYTES_PER_MIB = 1024 * 1024;
 const DEFAULT_COMPANY_ATTACHMENT_MAX_MIB = DEFAULT_COMPANY_ATTACHMENT_MAX_BYTES / BYTES_PER_MIB;
 const MAX_COMPANY_ATTACHMENT_MAX_MIB = MAX_COMPANY_ATTACHMENT_MAX_BYTES / BYTES_PER_MIB;
+
+const CONFIDENTIALITY_LEVEL_OPTIONS: Array<{
+  value: CompanyConfidentialityLevel;
+  label: string;
+  explanation: string;
+}> = [
+  {
+    value: "public",
+    label: "Public",
+    explanation: "No floor — tasks are classified from their own text only.",
+  },
+  {
+    value: "internal",
+    label: "Internal",
+    explanation: "Every task is treated at least as unreleased internal work product.",
+  },
+  {
+    value: "confidential",
+    label: "Confidential",
+    explanation: "Every task is treated at least as money/legal/HR-sensitive.",
+  },
+  {
+    value: "restricted",
+    label: "Restricted",
+    explanation: "Every task requires local inference — hosted adapters are refused outright.",
+  },
+];
 export function CompanySettings() {
   const {
     companies,
@@ -87,6 +114,29 @@ export function CompanySettings() {
       queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
     }
   });
+
+  const confidentialityQuery = useQuery({
+    queryKey: selectedCompanyId
+      ? queryKeys.companies.confidentiality(selectedCompanyId)
+      : (["companies", "__none__", "confidentiality"] as const),
+    queryFn: () => companiesApi.getConfidentiality(selectedCompanyId!),
+    enabled: !!selectedCompanyId,
+  });
+
+  const confidentialityMutation = useMutation({
+    mutationFn: (data: { defaultConfidentiality?: CompanyConfidentialityLevel; privacyMode?: boolean }) =>
+      companiesApi.updateConfidentiality(selectedCompanyId!, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.companies.confidentiality(selectedCompanyId!)
+      });
+    }
+  });
+
+  const confidentiality = confidentialityQuery.data;
+  const confidentialityLevel = confidentiality?.defaultConfidentiality ?? "public";
+  const privacyMode = confidentiality?.privacyMode ?? false;
+  const localInferenceRequired = privacyMode || confidentialityLevel === "restricted";
 
   const syncLogoState = (nextLogoUrl: string | null) => {
     setLogoUrl(nextLogoUrl ?? "");
@@ -362,6 +412,82 @@ export function CompanySettings() {
             onChange={(v) => settingsMutation.mutate(v)}
             toggleTestId="company-settings-team-approval-toggle"
           />
+        </div>
+      </div>
+
+      {/* Confidentiality */}
+      <div className="space-y-4" data-testid="company-settings-confidentiality-section">
+        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Confidentiality
+        </div>
+        <div className="space-y-3 rounded-md border border-border px-4 py-4">
+          {confidentialityQuery.isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading confidentiality settings...</p>
+          ) : confidentialityQuery.error ? (
+            <p className="text-sm text-destructive">
+              {confidentialityQuery.error instanceof Error
+                ? confidentialityQuery.error.message
+                : "Failed to load confidentiality settings."}
+            </p>
+          ) : (
+            <>
+              <Field
+                label="Default confidentiality level"
+                hint="Floor applied to every task's classified sensitivity. Task text can raise a task above the floor, never below it."
+              >
+                <div className="space-y-1.5">
+                  <select
+                    value={confidentialityLevel}
+                    onChange={(e) =>
+                      confidentialityMutation.mutate({
+                        defaultConfidentiality: e.target.value as CompanyConfidentialityLevel
+                      })
+                    }
+                    disabled={confidentialityMutation.isPending}
+                    className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none"
+                    data-testid="company-settings-confidentiality-level"
+                  >
+                    {CONFIDENTIALITY_LEVEL_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label} — {option.explanation}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    {
+                      CONFIDENTIALITY_LEVEL_OPTIONS.find(
+                        (option) => option.value === confidentialityLevel
+                      )?.explanation
+                    }
+                  </p>
+                </div>
+              </Field>
+              <ToggleField
+                label="Privacy mode"
+                hint="Route every task — regardless of classified level — only to local-inference adapters."
+                checked={privacyMode}
+                onChange={(v) => confidentialityMutation.mutate({ privacyMode: v })}
+                toggleTestId="company-settings-privacy-mode-toggle"
+              />
+              {localInferenceRequired && (
+                <p className="rounded-md border border-border bg-accent/20 px-3 py-2 text-xs text-muted-foreground">
+                  Restricted work{privacyMode ? " (and, with privacy mode on, all work)" : ""} only
+                  dispatches to adapters listed in{" "}
+                  <code className="font-mono">PAPERCLIP_LOCAL_INFERENCE_ADAPTERS</code>. Every
+                  built-in adapter sends prompts to a hosted provider, so until that environment
+                  variable names a genuinely local adapter, affected tasks will not run. They are
+                  not queued somewhere hopeful; they simply do not go anywhere.
+                </p>
+              )}
+              {confidentialityMutation.isError && (
+                <p className="text-xs text-destructive">
+                  {confidentialityMutation.error instanceof Error
+                    ? confidentialityMutation.error.message
+                    : "Failed to save confidentiality settings."}
+                </p>
+              )}
+            </>
+          )}
         </div>
       </div>
 

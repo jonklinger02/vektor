@@ -3,6 +3,7 @@ export const queryKeys = {
     all: ["companies"] as const,
     detail: (id: string) => ["companies", id] as const,
     stats: ["companies", "stats"] as const,
+    confidentiality: (id: string) => ["companies", id, "confidentiality"] as const,
   },
   companySkills: {
     list: (companyId: string) => ["company-skills", companyId] as const,
@@ -276,6 +277,10 @@ export const queryKeys = {
     ["usage-quota-windows", companyId] as const,
   heartbeats: (companyId: string, agentId?: string) =>
     ["heartbeats", companyId, agentId] as const,
+  heartbeatAllocation: (companyId: string) =>
+    ["heartbeat-allocation", companyId] as const,
+  schedulerTicks: (companyId: string, limit: number) =>
+    ["scheduler-ticks", companyId, limit] as const,
   runDetail: (runId: string) => ["heartbeat-run", runId] as const,
   runWorkspaceOperations: (runId: string) => ["heartbeat-run", runId, "workspace-operations"] as const,
   liveRuns: (companyId: string) => ["live-runs", companyId] as const,
@@ -298,5 +303,15 @@ export const queryKeys = {
   },
   adapters: {
     all: ["adapters"] as const,
+  },
+  routing: {
+    versions: ["routing", "versions"] as const,
+    audit: (companyId: string, limit: number) => ["routing", "audit", companyId, limit] as const,
+  },
+  auditEvents: {
+    company: (companyId: string, action: string, limit: number) =>
+      ["audit-events", "company", companyId, action, limit] as const,
+    instance: (action: string, limit: number) =>
+      ["audit-events", "instance", action, limit] as const,
   },
 };

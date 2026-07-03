@@ -51,6 +51,11 @@ import {
   reconcileAdapterAvailability,
 } from "./services/adapter-registry-bootstrap.js";
 import { createFeedbackTraceShareClientFromConfig } from "./services/feedback-share-client.js";
+import {
+  countAllocationSkipsSince,
+  countBudgetSkipsSince,
+  recordSchedulerTick,
+} from "./services/scheduler-tick-telemetry.js";
 import { buildRuntimeApiCandidateUrls, choosePrimaryRuntimeApiUrl } from "./runtime-api.js";
 import { createPluginWorkerManager } from "./services/plugin-worker-manager.js";
 import { createStorageServiceFromConfig } from "./storage/index.js";
@@ -858,56 +863,83 @@ export async function startServer(): Promise<StartedServer> {
       logger.error({ err }, "startup heartbeat recovery failed");
     });
 
+    // Vektor free-tick/paid-dispatch telemetry: each scheduler pass is a free,
+    // programmatic scan; one append-only scheduler_ticks row per pass records
+    // what it found/dispatched and how many dispatches the budget hard-stop
+    // refused in the window. The in-flight guard keeps a slow pass from being
+    // lapped by the next interval; a late pass is recorded as lapsed.
+    let schedulerTickInFlight = false;
+    let lastSchedulerTickStartedAtMs: number | null = null;
     setInterval(() => {
-      const sweptRuntimeStatuses = heartbeat.sweepExpiredRuntimeStatuses();
-      if (sweptRuntimeStatuses > 0) {
-        logger.info(
-          { swept: sweptRuntimeStatuses },
-          "heartbeat runtime-status sweeper cleared expired entries",
-        );
-      }
+      if (schedulerTickInFlight) return;
+      schedulerTickInFlight = true;
+      void (async () => {
+        const tickStartedAt = new Date();
+        const lapsed =
+          lastSchedulerTickStartedAtMs !== null &&
+          tickStartedAt.getTime() - lastSchedulerTickStartedAtMs >
+            config.heartbeatSchedulerIntervalMs * 2;
+        // Budget-skip window: everything refused since the PREVIOUS tick looked
+        // (skips also occur between ticks via user/plugin wakes; counting from
+        // this tick's start would drop those on the floor).
+        const budgetSkipWindowStart =
+          lastSchedulerTickStartedAtMs !== null
+            ? new Date(lastSchedulerTickStartedAtMs)
+            : tickStartedAt;
+        lastSchedulerTickStartedAtMs = tickStartedAt.getTime();
+        let timersEnqueued = 0;
+        let routinesTriggered = 0;
+        let retriesPromoted = 0;
+        let issuesDispatched = 0;
+        let runsRequeued = 0;
 
-      void heartbeat
-        .tickTimers(new Date())
-        .then((result) => {
+        const sweptRuntimeStatuses = heartbeat.sweepExpiredRuntimeStatuses();
+        if (sweptRuntimeStatuses > 0) {
+          logger.info(
+            { swept: sweptRuntimeStatuses },
+            "heartbeat runtime-status sweeper cleared expired entries",
+          );
+        }
+
+        try {
+          const result = await heartbeat.tickTimers(new Date());
+          timersEnqueued = result.enqueued;
           if (result.enqueued > 0) {
             logger.info({ ...result }, "heartbeat timer tick enqueued runs");
           }
-        })
-        .catch((err) => {
+        } catch (err) {
           logger.error({ err }, "heartbeat timer tick failed");
-        });
+        }
 
-      void routines
-        .tickScheduledTriggers(new Date())
-        .then((result) => {
+        try {
+          const result = await routines.tickScheduledTriggers(new Date());
+          routinesTriggered = result.triggered;
           if (result.triggered > 0) {
             logger.info({ ...result }, "routine scheduler tick enqueued runs");
           }
-        })
-        .catch((err) => {
+        } catch (err) {
           logger.error({ err }, "routine scheduler tick failed");
-        });
+        }
 
-      void environmentCustomImages
-        .cleanupExpiredSetupSessions()
-        .then((result) => {
+        try {
+          const result = await environmentCustomImages.cleanupExpiredSetupSessions();
           if (result.timedOut > 0 || result.failed > 0) {
             logger.warn({ ...result }, "environment customImage setup cleanup changed sessions");
           }
-        })
-        .catch((err) => {
+        } catch (err) {
           logger.error({ err }, "environment customImage setup cleanup failed");
-        });
-  
-      // Periodically reap orphaned runs (5-min staleness threshold) and make sure
-      // persisted queued work is still being driven forward.
-      void heartbeat
-        .reapOrphanedRuns({ staleThresholdMs: 5 * 60 * 1000 })
-        .then(() => heartbeat.promoteDueScheduledRetries())
-        .then(async (promotion) => {
+        }
+
+        // Periodically reap orphaned runs (5-min staleness threshold) and make sure
+        // persisted queued work is still being driven forward.
+        try {
+          await heartbeat.reapOrphanedRuns({ staleThresholdMs: 5 * 60 * 1000 });
+          const promotion = await heartbeat.promoteDueScheduledRetries();
+          retriesPromoted = promotion.promoted;
           await heartbeat.resumeQueuedRuns();
           const reconciled = await heartbeat.reconcileStrandedAssignedIssues();
+          issuesDispatched = reconciled.assignmentDispatched;
+          runsRequeued = reconciled.dispatchRequeued + reconciled.continuationRequeued;
           if (
             promotion.promoted > 0 ||
             reconciled.assignmentDispatched > 0 ||
@@ -921,40 +953,53 @@ export async function startServer(): Promise<StartedServer> {
               "periodic heartbeat recovery changed assigned issue state",
             );
           }
-        })
-        .then(async () => {
-          const reconciled = await heartbeat.reconcileIssueGraphLiveness();
-          if (reconciled.escalationsCreated > 0) {
-            logger.warn({ ...reconciled }, "periodic issue-graph liveness reconciliation created escalations");
+          const graphLiveness = await heartbeat.reconcileIssueGraphLiveness();
+          if (graphLiveness.escalationsCreated > 0) {
+            logger.warn({ ...graphLiveness }, "periodic issue-graph liveness reconciliation created escalations");
           }
-        })
-        .then(async () => {
-          const reconciled = await heartbeat.reconcileTaskWatchdogs();
-          if (reconciled.triggered > 0) {
-            logger.warn({ ...reconciled }, "periodic task-watchdog reconciliation triggered watchdog work");
+          const watchdogs = await heartbeat.reconcileTaskWatchdogs();
+          if (watchdogs.triggered > 0) {
+            logger.warn({ ...watchdogs }, "periodic task-watchdog reconciliation triggered watchdog work");
           }
-        })
-        .then(async () => {
           const scanned = await heartbeat.scanSilentActiveRuns();
           if (scanned.created > 0 || scanned.escalated > 0) {
             logger.warn({ ...scanned }, "periodic active-run output watchdog created review work");
           }
-        })
-        .then(async () => {
           const swept = await heartbeat.sweepStaleIssueLocks();
           if (swept.cleared > 0) {
             logger.warn({ ...swept }, "periodic stale-lock sweeper cleared issue locks");
           }
-        })
-        .then(async () => {
           const reviewed = await heartbeat.reconcileProductivityReviews();
           if (reviewed.created > 0 || reviewed.updated > 0 || reviewed.failed > 0) {
             logger.warn({ ...reviewed }, "periodic productivity reconciliation created or updated review work");
           }
-        })
-        .catch((err) => {
+        } catch (err) {
           logger.error({ err }, "periodic heartbeat recovery failed");
-        });
+        }
+
+        // Telemetry write is best-effort: it must never break the scheduler.
+        try {
+          const skippedBudget = await countBudgetSkipsSince(db, budgetSkipWindowStart);
+          const skippedAllocation = await countAllocationSkipsSince(db, budgetSkipWindowStart);
+          await recordSchedulerTick(db, {
+            tickStartedAt,
+            intervalMs: config.heartbeatSchedulerIntervalMs,
+            durationMs: Date.now() - tickStartedAt.getTime(),
+            lapsed,
+            timersEnqueued,
+            routinesTriggered,
+            retriesPromoted,
+            issuesDispatched,
+            runsRequeued,
+            skippedBudget,
+            skippedAllocation,
+          });
+        } catch (err) {
+          logger.warn({ err }, "scheduler tick telemetry write failed");
+        }
+      })().finally(() => {
+        schedulerTickInFlight = false;
+      });
     }, config.heartbeatSchedulerIntervalMs);
   }
   

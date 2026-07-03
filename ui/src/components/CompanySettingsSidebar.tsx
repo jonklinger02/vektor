@@ -9,11 +9,13 @@ import {
   MailPlus,
   MonitorCog,
   Puzzle,
+  ScrollText,
   Settings,
   Shield,
   SlidersHorizontal,
   UserRoundPen,
   Users,
+  Waypoints,
 } from "lucide-react";
 import type { PluginRecord } from "@paperclipai/shared";
 import { sidebarBadgesApi } from "@/api/sidebarBadges";
@@ -133,6 +135,7 @@ export function CompanySettingsSidebar() {
             ))}
           <SidebarNavItem to="/company/settings/invites" label="Invites" icon={MailPlus} end />
           <SidebarNavItem to="/company/settings/secrets" label="Secrets" icon={KeyRound} end />
+          <SidebarNavItem to="/company/settings/audit-log" label="Audit Log" icon={ScrollText} end />
         </div>
         <div className="mt-5 px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Instance settings
@@ -166,6 +169,18 @@ export function CompanySettingsSidebar() {
             to={`${INSTANCE_SETTINGS_PATH_PREFIX}/heartbeats`}
             label="Heartbeats"
             icon={Clock3}
+            end
+          />
+          <SidebarNavItem
+            to={`${INSTANCE_SETTINGS_PATH_PREFIX}/routing`}
+            label="Routing"
+            icon={Waypoints}
+            end
+          />
+          <SidebarNavItem
+            to={`${INSTANCE_SETTINGS_PATH_PREFIX}/audit-log`}
+            label="Audit Log"
+            icon={ScrollText}
             end
           />
           <SidebarNavItem

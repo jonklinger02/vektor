@@ -99,3 +99,9 @@ export { pluginDatabaseNamespaces, pluginMigrations } from "./plugin_database.js
 export { pluginJobs, pluginJobRuns } from "./plugin_jobs.js";
 export { pluginWebhookDeliveries } from "./plugin_webhooks.js";
 export { pluginLogs } from "./plugin_logs.js";
+
+export { schedulerTicks } from "./scheduler_ticks.js";
+export { companyHeartbeatConfigs } from "./company_heartbeat_configs.js";
+export { routingConfigVersions, routingDecisionAudit } from "./routing_config_versions.js";
+export { agentLearnings } from "./agent_learnings.js";
+export { auditEvents } from "./audit_events.js";

@@ -637,6 +637,7 @@ const BOARD_ONLY_PREFIXES = [
 
 const BOARD_ONLY_OPERATIONS = new Set([
   "GET /api/companies",
+  "GET /api/routing/versions",
   "POST /api/companies",
   "GET /api/companies/stats",
   "GET /api/companies/issues",
@@ -648,6 +649,7 @@ const BOARD_ONLY_OPERATIONS = new Set([
   "GET /api/companies/{companyId}/join-requests",
   "POST /api/companies/{companyId}/join-requests/{requestId}/approve",
   "POST /api/companies/{companyId}/join-requests/{requestId}/reject",
+  "GET /api/companies/{companyId}/audit-events",
   "GET /api/companies/{companyId}/members",
   "PATCH /api/companies/{companyId}/members/{memberId}",
   "PATCH /api/companies/{companyId}/members/{memberId}/role-and-grants",
@@ -684,7 +686,14 @@ const BOARD_ONLY_OPERATIONS = new Set([
 ]);
 
 const INSTANCE_ADMIN_OPERATIONS = new Set([
+  "GET /api/audit-events",
   "POST /api/companies",
+  "POST /api/routing/versions",
+  "POST /api/routing/versions/{id}/canary",
+  "POST /api/routing/versions/{id}/promote",
+  "POST /api/routing/classes/{taskClass}/freeze",
+  "POST /api/routing/classes/{taskClass}/unfreeze",
+  "POST /api/routing/classes/{taskClass}/rollback",
   "POST /api/plugins/install",
   "POST /api/instance/database-backups",
   "POST /api/admin/users/{userId}/promote-instance-admin",
@@ -736,6 +745,7 @@ const CREATED_OPERATIONS = new Set([
   "POST /api/admin/users/{userId}/promote-instance-admin",
   "POST /api/plugins/install",
   "POST /api/instance/database-backups",
+  "POST /api/routing/versions",
 ]);
 
 const ACCEPTED_OPERATIONS = new Set([
@@ -2976,6 +2986,183 @@ registry.registerPath({
   summary: "List heartbeat runs for a company",
   request: { params: z.object({ companyId: z.string() }) },
   responses: { 200: r.ok(), 401: r.unauthorized },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/companies/{companyId}/heartbeat-allocation",
+  tags: ["runs"],
+  summary: "Get the company's heartbeat compute allocation and derived policy",
+  request: { params: z.object({ companyId: z.string() }) },
+  responses: { 200: r.ok(), 401: r.unauthorized },
+});
+
+registry.registerPath({
+  method: "put",
+  path: "/api/companies/{companyId}/heartbeat-allocation",
+  tags: ["runs"],
+  summary: "Reallocate the company's heartbeat processors/memory budget",
+  request: {
+    params: z.object({ companyId: z.string() }),
+    body: jsonBody(z.object({
+      processors: z.number().int().min(0),
+      memory: z.number().int().min(0),
+    })),
+  },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/companies/{companyId}/scheduler-ticks",
+  tags: ["runs"],
+  summary: "List recent scheduler tick telemetry rows",
+  request: { params: z.object({ companyId: z.string() }) },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized },
+});
+
+// ─── Routing governance (smart-router versioned tables) ─────────────────────
+
+const routingModelSpecsSchema = z
+  .array(z.object({
+    model: z.string().trim().min(1),
+    cost: z.number(),
+    capability: z.number(),
+  }))
+  .min(1);
+
+registry.registerPath({
+  method: "get",
+  path: "/api/routing/versions",
+  tags: ["routing"],
+  summary: "List routing config versions (optionally for one task class)",
+  request: { query: z.object({ taskClass: z.string().optional() }) },
+  responses: { 200: r.ok(), 401: r.unauthorized },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/routing/versions",
+  tags: ["routing"],
+  summary: "Propose a draft routing config version for a task class",
+  request: {
+    body: jsonBody(z.object({
+      taskClass: z.string().trim().min(1),
+      modelSpecs: routingModelSpecsSchema,
+    })),
+  },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/routing/versions/{id}/canary",
+  tags: ["routing"],
+  summary: "Promote a draft routing version to canary at a traffic percent",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: jsonBody(z.object({ percent: z.number().int().min(1).max(99) })),
+  },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized, 404: r.notFound },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/routing/versions/{id}/promote",
+  tags: ["routing"],
+  summary: "Promote a draft or canary routing version to active",
+  request: { params: z.object({ id: z.string() }) },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized, 404: r.notFound },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/routing/classes/{taskClass}/freeze",
+  tags: ["routing"],
+  summary: "Freeze the active routing version for a task class (emergency pin)",
+  request: { params: z.object({ taskClass: z.string() }) },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/routing/classes/{taskClass}/unfreeze",
+  tags: ["routing"],
+  summary: "Unfreeze a frozen routing version for a task class",
+  request: { params: z.object({ taskClass: z.string() }) },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/routing/classes/{taskClass}/rollback",
+  tags: ["routing"],
+  summary: "Roll the task class back to the previous routing version",
+  request: { params: z.object({ taskClass: z.string() }) },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/companies/{companyId}/routing-audit",
+  tags: ["routing"],
+  summary: "List recent smart-router routing decisions for a company",
+  request: {
+    params: z.object({ companyId: z.string() }),
+    query: z.object({ limit: z.string().optional() }),
+  },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized },
+});
+
+// ─── Audit events (immutable SOC2-style trail) ───────────────────────────────
+
+registry.registerPath({
+  method: "get",
+  path: "/api/companies/{companyId}/audit-events",
+  tags: ["audit"],
+  summary: "List the company's immutable audit events (newest first)",
+  request: {
+    params: z.object({ companyId: z.string() }),
+    query: z.object({ action: z.string().optional(), limit: z.string().optional() }),
+  },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/audit-events",
+  tags: ["audit"],
+  summary: "List instance-wide audit events (instance admin only)",
+  request: {
+    query: z.object({ action: z.string().optional(), limit: z.string().optional() }),
+  },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized },
+});
+
+// ─── Company confidentiality settings ────────────────────────────────────────
+
+registry.registerPath({
+  method: "get",
+  path: "/api/companies/{companyId}/confidentiality",
+  tags: ["companies"],
+  summary: "Get the company's confidentiality settings",
+  request: { params: z.object({ companyId: z.string() }) },
+  responses: { 200: r.ok(), 401: r.unauthorized, 404: r.notFound },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/companies/{companyId}/confidentiality",
+  tags: ["companies"],
+  summary: "Update the company's default confidentiality level and privacy mode",
+  request: {
+    params: z.object({ companyId: z.string() }),
+    body: jsonBody(z.object({
+      defaultConfidentiality: z.enum(["public", "internal", "confidential", "restricted"]).optional(),
+      privacyMode: z.boolean().optional(),
+    })),
+  },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized, 404: r.notFound },
 });
 
 registry.registerPath({

@@ -13,6 +13,13 @@ import { api } from "./client";
 
 export type CompanyStats = Record<string, { agentCount: number; issueCount: number }>;
 
+export type CompanyConfidentialityLevel = "public" | "internal" | "confidential" | "restricted";
+
+export interface CompanyConfidentiality {
+  defaultConfidentiality: CompanyConfidentialityLevel;
+  privacyMode: boolean;
+}
+
 export const companiesApi = {
   list: () => api.get<Company[]>("/companies"),
   get: (companyId: string) => api.get<Company>(`/companies/${companyId}`),
@@ -42,6 +49,10 @@ export const companiesApi = {
   ) => api.patch<Company>(`/companies/${companyId}`, data),
   updateBranding: (companyId: string, data: UpdateCompanyBranding) =>
     api.patch<Company>(`/companies/${companyId}/branding`, data),
+  getConfidentiality: (companyId: string) =>
+    api.get<CompanyConfidentiality>(`/companies/${companyId}/confidentiality`),
+  updateConfidentiality: (companyId: string, data: Partial<CompanyConfidentiality>) =>
+    api.patch<CompanyConfidentiality>(`/companies/${companyId}/confidentiality`, data),
   archive: (companyId: string) => api.post<Company>(`/companies/${companyId}/archive`, {}),
   remove: (companyId: string) => api.delete<{ ok: true }>(`/companies/${companyId}`),
   exportBundle: (

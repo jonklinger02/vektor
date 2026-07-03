@@ -3,7 +3,7 @@ import { Router, type Request } from "express";
 import { and, count as countFn, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@paperclipai/db";
-import { agents as agentsTable } from "@paperclipai/db";
+import { agents as agentsTable, companies as companiesTable } from "@paperclipai/db";
 import {
   DEFAULT_FEEDBACK_DATA_SHARING_TERMS_VERSION,
   companyArtifactsQuerySchema,
@@ -31,8 +31,21 @@ import {
   workTimelineService,
 } from "../services/index.js";
 import type { StorageService } from "../storage/types.js";
-import { assertBoard, assertCompanyAccess, assertInstanceAdmin, getActorInfo } from "./authz.js";
+import { assertBoard, assertCompanyAccess, assertInstanceAdmin, getActorInfo, requireCompanyRole } from "./authz.js";
+import { emitAuditEvent } from "../services/audit-events.js";
 import { COMPANY_IMPORT_ROUTE_PATH } from "./company-import-paths.js";
+
+const CONFIDENTIALITY_LEVELS = ["public", "internal", "confidential", "restricted"] as const;
+
+const updateCompanyConfidentialitySchema = z
+  .object({
+    defaultConfidentiality: z.enum(CONFIDENTIALITY_LEVELS).optional(),
+    privacyMode: z.boolean().optional(),
+  })
+  .refine(
+    (value) => value.defaultConfidentiality !== undefined || value.privacyMode !== undefined,
+    { message: "Provide defaultConfidentiality and/or privacyMode" },
+  );
 
 export function companyRoutes(db: Db, storage?: StorageService) {
   const router = Router();
@@ -247,6 +260,16 @@ export function companyRoutes(db: Db, storage?: StorageService) {
     await assertSameCompanyCeoAgentOrBoard(req, companyId, "company exports");
     const body = companyPortabilityExportSchema.parse(req.body);
     const result = await portability.exportBundle(companyId, body);
+    const actor = getActorInfo(req);
+    emitAuditEvent(db, {
+      companyId,
+      actorUserId: actor.actorType === "user" ? actor.actorId : null,
+      actorType: actor.actorType,
+      action: "company.export",
+      subjectType: "company",
+      subjectId: companyId,
+      details: { include: body.include ?? null, agentId: actor.agentId },
+    });
     res.json(result);
   });
 
@@ -315,6 +338,16 @@ export function companyRoutes(db: Db, storage?: StorageService) {
     await assertSameCompanyCeoAgentOrBoard(req, companyId, "company exports");
     const body = companyPortabilityExportSchema.parse(req.body);
     const result = await portability.exportBundle(companyId, body);
+    const actor = getActorInfo(req);
+    emitAuditEvent(db, {
+      companyId,
+      actorUserId: actor.actorType === "user" ? actor.actorId : null,
+      actorType: actor.actorType,
+      action: "company.export",
+      subjectType: "company",
+      subjectId: companyId,
+      details: { include: body.include ?? null, agentId: actor.agentId },
+    });
     res.json(result);
   });
 
@@ -507,6 +540,81 @@ export function companyRoutes(db: Db, storage?: StorageService) {
     });
     res.json(company);
   });
+
+  router.get("/:companyId/confidentiality", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const row = await db
+      .select({
+        defaultConfidentiality: companiesTable.defaultConfidentiality,
+        privacyMode: companiesTable.privacyMode,
+      })
+      .from(companiesTable)
+      .where(eq(companiesTable.id, companyId))
+      .then((rows) => rows[0] ?? null);
+    if (!row) {
+      res.status(404).json({ error: "Company not found" });
+      return;
+    }
+    res.json(row);
+  });
+
+  router.patch(
+    "/:companyId/confidentiality",
+    validate(updateCompanyConfidentialitySchema),
+    async (req, res) => {
+      const companyId = req.params.companyId as string;
+      assertCompanyAccess(req, companyId);
+      assertBoard(req);
+      requireCompanyRole(req, companyId, "admin");
+
+      const patch: Partial<{ defaultConfidentiality: string; privacyMode: boolean }> = {};
+      if (req.body.defaultConfidentiality !== undefined) {
+        patch.defaultConfidentiality = req.body.defaultConfidentiality;
+      }
+      if (req.body.privacyMode !== undefined) {
+        patch.privacyMode = req.body.privacyMode;
+      }
+
+      const updated = await db
+        .update(companiesTable)
+        .set({ ...patch, updatedAt: new Date() })
+        .where(eq(companiesTable.id, companyId))
+        .returning({
+          defaultConfidentiality: companiesTable.defaultConfidentiality,
+          privacyMode: companiesTable.privacyMode,
+        })
+        .then((rows) => rows[0] ?? null);
+      if (!updated) {
+        res.status(404).json({ error: "Company not found" });
+        return;
+      }
+
+      const actor = getActorInfo(req);
+      emitAuditEvent(db, {
+        companyId,
+        actorUserId: actor.actorType === "user" ? actor.actorId : null,
+        actorType: actor.actorType,
+        action: "company.confidentiality_updated",
+        subjectType: "company",
+        subjectId: companyId,
+        details: patch,
+      });
+      await logActivity(db, {
+        companyId,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        agentId: actor.agentId,
+        runId: actor.runId,
+        action: "company.confidentiality_updated",
+        entityType: "company",
+        entityId: companyId,
+        details: patch,
+      });
+
+      res.json(updated);
+    },
+  );
 
   router.post("/:companyId/archive", async (req, res) => {
     const companyId = req.params.companyId as string;
