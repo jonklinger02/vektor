@@ -106,7 +106,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
 
       - name: Restore regenerated PR lockfile (if policy uploaded one)
         uses: actions/download-artifact@v8
@@ -165,7 +164,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
 
       - name: Restore regenerated PR lockfile (if policy uploaded one)
         uses: actions/download-artifact@v8
@@ -223,7 +221,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
 
       - name: Restore regenerated PR lockfile (if policy uploaded one)
         uses: actions/download-artifact@v8
@@ -272,7 +269,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
 
       - name: Restore regenerated PR lockfile (if policy uploaded one)
         uses: actions/download-artifact@v8
@@ -305,7 +301,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
 
       - name: Restore regenerated PR lockfile (if policy uploaded one)
         uses: actions/download-artifact@v8
@@ -358,7 +353,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
 
       - name: Restore regenerated PR lockfile (if policy uploaded one)
         uses: actions/download-artifact@v8
