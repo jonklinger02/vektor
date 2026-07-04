@@ -9,7 +9,10 @@ import { readConfigFile } from "../config-file.js";
 //      provider "claude" and an apiKey.
 //   2. OpenAI — env OPENAI_API_KEY, or config-file llm block with provider
 //      "openai" and an apiKey.
-//   3. Neither → null (the calling feature is silently disabled).
+//   3. Ollama Cloud — env OLLAMA_API_KEY, or config-file llm block with
+//      provider "ollama" (OpenAI-compatible /v1; llm.baseUrl overrides for a
+//      self-hosted daemon, which may be keyless).
+//   4. None → null (the calling feature is silently disabled).
 //
 // completeText NEVER throws — any failure (no key, HTTP error, timeout,
 // malformed payload) resolves to null.
@@ -21,6 +24,8 @@ const ANTHROPIC_VERSION = "2023-06-01";
 const ANTHROPIC_MODEL = "claude-haiku-4-5";
 const OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const OPENAI_MODEL = "gpt-5-mini";
+const OLLAMA_CLOUD_BASE_URL = "https://ollama.com/v1";
+const OLLAMA_MODEL = "gpt-oss:20b";
 
 export interface CompleteTextInput {
   system?: string;
@@ -31,6 +36,7 @@ export interface CompleteTextInput {
 type ResolvedProvider =
   | { provider: "anthropic"; apiKey: string }
   | { provider: "openai"; apiKey: string }
+  | { provider: "ollama"; apiKey: string; baseUrl: string; model: string }
   | null;
 
 function resolveProvider(): ResolvedProvider {
@@ -47,6 +53,22 @@ function resolveProvider(): ResolvedProvider {
     process.env.OPENAI_API_KEY?.trim() ||
     (configProvider === "openai" ? configKey : null);
   if (openaiKey) return { provider: "openai", apiKey: openaiKey };
+
+  const ollamaKey =
+    process.env.OLLAMA_API_KEY?.trim() ||
+    (configProvider === "ollama" ? configKey : null);
+  const ollamaBaseUrl =
+    (configProvider === "ollama" ? config?.llm?.baseUrl?.trim() : null) ||
+    OLLAMA_CLOUD_BASE_URL;
+  // A self-hosted daemon (non-cloud baseUrl) may be keyless; Ollama Cloud needs a key.
+  if (ollamaKey || (configProvider === "ollama" && ollamaBaseUrl !== OLLAMA_CLOUD_BASE_URL)) {
+    return {
+      provider: "ollama",
+      apiKey: ollamaKey ?? "",
+      baseUrl: ollamaBaseUrl,
+      model: (configProvider === "ollama" ? config?.llm?.model?.trim() : null) || OLLAMA_MODEL,
+    };
+  }
 
   return null;
 }
@@ -115,6 +137,40 @@ async function completeViaOpenAi(
   return typeof content === "string" && content.length > 0 ? content : null;
 }
 
+async function completeViaOllama(
+  resolved: { apiKey: string; baseUrl: string; model: string },
+  input: CompleteTextInput,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const response = await fetch(
+    `${resolved.baseUrl.replace(/\/$/, "")}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        // Keyless self-hosted daemons reject no header; only send auth when a key exists.
+        ...(resolved.apiKey ? { Authorization: `Bearer ${resolved.apiKey}` } : {}),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: resolved.model,
+        max_tokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
+        messages: [
+          ...(input.system ? [{ role: "system", content: input.system }] : []),
+          { role: "user", content: input.prompt },
+        ],
+      }),
+      signal,
+    },
+  );
+  if (!response.ok) return null;
+
+  const payload = (await response.json()) as {
+    choices?: Array<{ message?: { content?: unknown } }>;
+  };
+  const content = payload.choices?.[0]?.message?.content;
+  return typeof content === "string" && content.length > 0 ? content : null;
+}
+
 /**
  * Run a one-shot text completion on whichever provider is configured.
  * Returns the completion text, or null when no provider is configured or
@@ -130,6 +186,9 @@ export async function completeText(input: CompleteTextInput): Promise<string | n
     try {
       if (resolved.provider === "anthropic") {
         return await completeViaAnthropic(resolved.apiKey, input, controller.signal);
+      }
+      if (resolved.provider === "ollama") {
+        return await completeViaOllama(resolved, input, controller.signal);
       }
       return await completeViaOpenAi(resolved.apiKey, input, controller.signal);
     } finally {

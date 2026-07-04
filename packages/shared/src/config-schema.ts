@@ -16,8 +16,12 @@ export const configMetaSchema = z.object({
 });
 
 export const llmConfigSchema = z.object({
-  provider: z.enum(["claude", "openai"]),
+  provider: z.enum(["claude", "openai", "ollama"]),
   apiKey: z.string().optional(),
+  // Ollama only: base URL override for a self-hosted daemon (default is
+  // Ollama Cloud https://ollama.com/v1) and the utility-lane model id.
+  baseUrl: z.string().optional(),
+  model: z.string().optional(),
 });
 
 export const databaseBackupConfigSchema = z.object({

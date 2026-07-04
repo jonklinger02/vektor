@@ -19,6 +19,12 @@ const MODEL_RANK_PATTERNS: Array<{ pattern: RegExp; rank: ModelRank }> = [
   { pattern: /haiku/i, rank: { cost: 1, capability: 2 } },
   { pattern: /sonnet/i, rank: { cost: 2, capability: 3 } },
   { pattern: /opus|fable|mythos/i, rank: { cost: 4, capability: 4 } },
+  // Ollama Cloud (open-weight lanes). Must precede the OpenAI rules so
+  // "gpt-oss" can never drift into the gpt-5 family rule if these patterns
+  // loosen later; sized-id rules run before the family rule (first match wins).
+  { pattern: /gpt-oss:?120b/i, rank: { cost: 2, capability: 3 } },
+  { pattern: /gpt-oss/i, rank: { cost: 1, capability: 2 } },
+  { pattern: /qwen3|deepseek-v3\.?1|glm-4/i, rank: { cost: 2, capability: 3 } },
   // OpenAI
   { pattern: /mini|nano/i, rank: { cost: 1, capability: 2 } },
   { pattern: /gpt-5|o[0-9]/i, rank: { cost: 3, capability: 4 } },

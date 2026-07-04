@@ -59,6 +59,14 @@ describe("model catalog ranking", () => {
     expect(rankModel("mystery-model-9000")).toEqual({ cost: 3, capability: 2 });
   });
 
+  it("ranks Ollama Cloud lanes (sized gpt-oss before family, never the gpt-5 rule)", () => {
+    expect(rankModel("gpt-oss:20b")).toEqual({ cost: 1, capability: 2 });
+    expect(rankModel("gpt-oss:120b")).toEqual({ cost: 2, capability: 3 });
+    expect(rankModel("qwen3-coder:480b")).toEqual({ cost: 2, capability: 3 });
+    expect(rankModel("deepseek-v3.1:671b")).toEqual({ cost: 2, capability: 3 });
+    expect(rankModel("glm-4.6")).toEqual({ cost: 2, capability: 3 });
+  });
+
   it("every task class has a capability bar", () => {
     for (const bar of Object.values(CLASS_CAPABILITY_BAR)) {
       expect(bar).toBeGreaterThanOrEqual(1);
