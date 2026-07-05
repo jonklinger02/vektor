@@ -40,6 +40,11 @@
   --radius-md: 0.5rem;
   --radius-lg: 0px;
   --radius-xl: 0px;
+  /* Command Center type system — Syne (display/UI) + JetBrains Mono (code).
+     Loaded from Google Fonts in index.html; these tokens drive `font-sans`
+     (also the base body font in Tailwind v4) and `font-mono`. */
+  --font-sans: "Syne", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
 :root {
@@ -51,19 +56,23 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --primary: oklch(0.585 0.204 277.117); /* Command Center indigo #6366f1 */
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  --accent: oklch(0.97 0.01 285);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
+  --destructive: oklch(0.637 0.208 25.331); /* #ef4444 */
+  --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: oklch(0.585 0.204 277.117); /* indigo focus ring */
+  /* Brand wordmark gradient partner (violet #a855f7); pairs with --primary. */
+  --brand-accent-2: oklch(0.627 0.233 303.9);
+  --success: oklch(0.723 0.192 149.579); /* #22c55e */
+  --warning: oklch(0.769 0.165 70.08);   /* #f59e0b */
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -158,38 +167,45 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.637 0.237 25.331);
+  /* Command Center dark palette. Hex → oklch (see design mock):
+     bg #0a0a0f · surface #111118 · card #18181f · border2 #1e1e28 ·
+     border #252530 · indigo #6366f1 · violet #a855f7 · text #e2e2f0 ·
+     muted #6b6b8a · success #22c55e · danger #ef4444 · warning #f59e0b */
+  --background: oklch(0.147 0.011 285.007);   /* #0a0a0f */
+  --foreground: oklch(0.917 0.019 286.021);   /* #e2e2f0 */
+  --card: oklch(0.212 0.014 285.173);         /* #18181f */
+  --card-foreground: oklch(0.917 0.019 286.021);
+  --popover: oklch(0.212 0.014 285.173);      /* #18181f */
+  --popover-foreground: oklch(0.917 0.019 286.021);
+  --primary: oklch(0.585 0.204 277.117);      /* #6366f1 indigo */
+  --primary-foreground: oklch(0.985 0 0);     /* white — readable on indigo */
+  --secondary: oklch(0.181 0.014 284.885);    /* #111118 surface */
+  --secondary-foreground: oklch(0.917 0.019 286.021);
+  --muted: oklch(0.212 0.014 285.173);        /* #18181f */
+  --muted-foreground: oklch(0.54 0.048 284.671); /* #6b6b8a */
+  --accent: oklch(0.24 0.019 284.874);        /* #1e1e28 hover surface */
+  --accent-foreground: oklch(0.917 0.019 286.021);
+  --destructive: oklch(0.637 0.208 25.331);   /* #ef4444 */
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.145 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --border: oklch(0.269 0.02 284.955);        /* #252530 */
+  --input: oklch(0.269 0.02 284.955);         /* #252530 */
+  --ring: oklch(0.585 0.204 277.117);         /* #6366f1 indigo focus ring */
+  --brand-accent-2: oklch(0.627 0.233 303.9); /* #a855f7 violet */
+  --success: oklch(0.723 0.192 149.579);      /* #22c55e */
+  --warning: oklch(0.769 0.165 70.08);        /* #f59e0b */
+  --chart-1: oklch(0.585 0.204 277.117);      /* indigo */
+  --chart-2: oklch(0.627 0.233 303.9);        /* violet */
+  --chart-3: oklch(0.723 0.192 149.579);      /* green */
+  --chart-4: oklch(0.769 0.165 70.08);        /* amber */
+  --chart-5: oklch(0.637 0.208 25.331);       /* red */
+  --sidebar: oklch(0.181 0.014 284.885);      /* #111118 surface */
+  --sidebar-foreground: oklch(0.917 0.019 286.021);
+  --sidebar-primary: oklch(0.585 0.204 277.117);   /* indigo */
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+  --sidebar-accent: oklch(0.24 0.019 284.874);     /* #1e1e28 */
+  --sidebar-accent-foreground: oklch(0.917 0.019 286.021);
+  --sidebar-border: oklch(0.269 0.02 284.955);     /* #252530 */
+  --sidebar-ring: oklch(0.585 0.204 277.117);      /* indigo */
   --chip-match-title-bg: oklch(0.27 0.04 265 / 0.5);
   --chip-match-title-fg: oklch(0.78 0.10 265);
   --chip-match-title-border: oklch(0.4 0.06 265);
@@ -313,16 +329,16 @@
 }
 
 .dark *::-webkit-scrollbar-track {
-  background: oklch(0.205 0 0);
+  background: oklch(0.181 0.014 284.885);
 }
 
 .dark *::-webkit-scrollbar-thumb {
-  background: oklch(0.4 0 0);
+  background: oklch(0.32 0.02 285);
   border-radius: 4px;
 }
 
 .dark *::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.5 0 0);
+  background: oklch(0.42 0.03 285);
 }
 
 /* Auto-hide scrollbar: thin, stable gutter with the thumb visible only on hover */
@@ -1409,4 +1425,15 @@ span.paperclip-mention-chip[data-mention-kind="external-object"] {
 }
 .status-fill {
   background-color: var(--sc);
+}
+
+/* Brand wordmark — indigo → violet gradient clipped to the text (Command
+   Center brand mark). Falls back to a solid foreground fill where
+   background-clip:text is unsupported. */
+.brand-wordmark {
+  background-image: linear-gradient(90deg, var(--primary), var(--brand-accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
