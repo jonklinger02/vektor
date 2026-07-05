@@ -733,6 +733,19 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       args.push("--append-system-prompt-file", attemptInstructionsFilePath);
     }
     args.push("--add-dir", effectivePromptBundleAddDir);
+    // MCP: attach the instance's MCP fleet via a claude-CLI mcp-config JSON
+    // file staged on the host (PAPERCLIP_CLAUDE_MCP_CONFIG_PATH). Local
+    // execution targets only — a host path is meaningless inside a remote
+    // target's filesystem. The seeded-settings sanitizer strips mcpServers
+    // deliberately; this flag is the sanctioned, per-instance way back in.
+    const mcpConfigPath = (
+      effectiveEnv.PAPERCLIP_CLAUDE_MCP_CONFIG_PATH ??
+      process.env.PAPERCLIP_CLAUDE_MCP_CONFIG_PATH ??
+      ""
+    ).trim();
+    if (mcpConfigPath && !executionTargetIsRemote) {
+      args.push("--mcp-config", mcpConfigPath);
+    }
     if (extraArgs.length > 0) args.push(...extraArgs);
     return args;
   };

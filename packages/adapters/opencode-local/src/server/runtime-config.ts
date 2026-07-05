@@ -47,41 +47,52 @@ function expandEnvPlaceholders<T>(value: T, resolve: (name: string) => string | 
   return value;
 }
 
-function parseProviderConfig(
+function parseNamedObjectConfig(
   raw: unknown,
   resolveEnv: (name: string) => string | undefined,
   notes: string[],
+  envVarName: string,
+  labels: { ignored: string; skipped: string },
 ): Record<string, unknown> | null {
   if (typeof raw !== "string" || raw.trim().length === 0) return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    // Surface the misconfiguration instead of silently dropping the provider
+    // Surface the misconfiguration instead of silently dropping the config
     // block; an unparseable value would otherwise be undiagnosable.
-    notes.push("PAPERCLIP_OPENCODE_PROVIDERS contains invalid JSON; custom providers ignored.");
+    notes.push(`${envVarName} contains invalid JSON; ${labels.ignored} ignored.`);
     return null;
   }
   if (!isPlainObject(parsed)) {
-    notes.push(
-      "PAPERCLIP_OPENCODE_PROVIDERS is set but is not a JSON object; custom providers ignored.",
-    );
+    notes.push(`${envVarName} is set but is not a JSON object; ${labels.ignored} ignored.`);
     return null;
   }
-  // Only keep provider entries that are themselves objects; surface the ones
-  // we drop so a malformed entry is just as diagnosable as malformed JSON.
-  const providers: Record<string, unknown> = {};
+  // Only keep entries that are themselves objects; surface the ones we drop
+  // so a malformed entry is just as diagnosable as malformed JSON.
+  const entries: Record<string, unknown> = {};
   const skipped: string[] = [];
   for (const [key, value] of Object.entries(parsed)) {
-    if (isPlainObject(value)) providers[key] = expandEnvPlaceholders(value, resolveEnv);
+    if (isPlainObject(value)) entries[key] = expandEnvPlaceholders(value, resolveEnv);
     else skipped.push(key);
   }
   if (skipped.length > 0) {
     notes.push(
-      `PAPERCLIP_OPENCODE_PROVIDERS: skipped provider(s) with non-object values: ${skipped.join(", ")}.`,
+      `${envVarName}: skipped ${labels.skipped} with non-object values: ${skipped.join(", ")}.`,
     );
   }
-  return Object.keys(providers).length > 0 ? providers : null;
+  return Object.keys(entries).length > 0 ? entries : null;
+}
+
+function parseProviderConfig(
+  raw: unknown,
+  resolveEnv: (name: string) => string | undefined,
+  notes: string[],
+): Record<string, unknown> | null {
+  return parseNamedObjectConfig(raw, resolveEnv, notes, "PAPERCLIP_OPENCODE_PROVIDERS", {
+    ignored: "custom providers",
+    skipped: "provider(s)",
+  });
 }
 
 async function readJsonObject(filepath: string): Promise<Record<string, unknown>> {
@@ -171,6 +182,26 @@ export async function prepareOpenCodeRuntimeConfig(input: {
     );
   }
 
+  // Merge MCP server definitions supplied via PAPERCLIP_OPENCODE_MCP (a JSON
+  // object in OpenCode's `mcp` config shape: name → {type:"remote", url,
+  // headers?} | {type:"local", command:[...], environment?}). Same declarative
+  // pattern and {env:VAR} secret expansion as the custom providers above, so
+  // MCP endpoints and bearer tokens stay per-instance and out of code.
+  const mcpServers = parseNamedObjectConfig(
+    input.env.PAPERCLIP_OPENCODE_MCP ?? process.env.PAPERCLIP_OPENCODE_MCP,
+    resolveEnv,
+    notes,
+    "PAPERCLIP_OPENCODE_MCP",
+    { ignored: "MCP servers", skipped: "MCP server(s)" },
+  );
+  const existingMcp = isPlainObject(existingConfig.mcp) ? existingConfig.mcp : {};
+  const nextMcp = mcpServers ? { ...existingMcp, ...mcpServers } : existingMcp;
+  if (mcpServers) {
+    notes.push(
+      `Injected ${Object.keys(mcpServers).length} MCP server(s) from PAPERCLIP_OPENCODE_MCP: ${Object.keys(mcpServers).join(", ")}.`,
+    );
+  }
+
   const nextConfig: Record<string, unknown> = {
     ...existingConfig,
     permission: {
@@ -180,6 +211,9 @@ export async function prepareOpenCodeRuntimeConfig(input: {
   };
   if (Object.keys(nextProvider).length > 0) {
     nextConfig.provider = nextProvider;
+  }
+  if (Object.keys(nextMcp).length > 0) {
+    nextConfig.mcp = nextMcp;
   }
 
   // Pin OpenCode's auxiliary "small" model (used for session-title generation and

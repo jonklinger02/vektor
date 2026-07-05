@@ -157,6 +157,53 @@ describe("prepareOpenCodeRuntimeConfig", () => {
     await prepared.cleanup();
   });
 
+  it("merges MCP servers from PAPERCLIP_OPENCODE_MCP with {env:VAR} expansion", async () => {
+    const configHome = await makeConfigHome({ permission: { read: "allow" } });
+    const mcp = {
+      gws: { type: "remote", url: "https://gws-mcp.lan.example/mcp" },
+      vault: {
+        type: "remote",
+        url: "https://creds-mcp.lan.example/mcp",
+        headers: { Authorization: "Bearer {env:VAULT_MCP_TOKEN}" },
+      },
+      "ga-gateway": {
+        type: "local",
+        command: ["ssh", "-T", "agent@mcp-host", "/opt/mcp-servers/ga-gateway-mcp/launch-mcp.sh"],
+      },
+    };
+    const prepared = await prepareOpenCodeRuntimeConfig({
+      env: {
+        XDG_CONFIG_HOME: configHome,
+        PAPERCLIP_OPENCODE_MCP: JSON.stringify(mcp),
+        VAULT_MCP_TOKEN: "tok-123",
+      },
+      config: {},
+    });
+    cleanupPaths.add(prepared.env.XDG_CONFIG_HOME);
+    const runtimeConfig = JSON.parse(
+      await fs.readFile(path.join(prepared.env.XDG_CONFIG_HOME, "opencode", "opencode.json"), "utf8"),
+    ) as { mcp: Record<string, { headers?: Record<string, string> }> };
+    expect(Object.keys(runtimeConfig.mcp).sort()).toEqual(["ga-gateway", "gws", "vault"]);
+    expect(runtimeConfig.mcp.vault!.headers!.Authorization).toBe("Bearer tok-123");
+    expect(prepared.notes.some((n) => n.includes("PAPERCLIP_OPENCODE_MCP") || n.includes("MCP server"))).toBe(true);
+    await prepared.cleanup();
+  });
+
+  it("invalid PAPERCLIP_OPENCODE_MCP JSON is surfaced in notes and omitted", async () => {
+    const configHome = await makeConfigHome({ permission: { read: "allow" } });
+    const prepared = await prepareOpenCodeRuntimeConfig({
+      env: { XDG_CONFIG_HOME: configHome, PAPERCLIP_OPENCODE_MCP: "{not json" },
+      config: {},
+    });
+    cleanupPaths.add(prepared.env.XDG_CONFIG_HOME);
+    const runtimeConfig = JSON.parse(
+      await fs.readFile(path.join(prepared.env.XDG_CONFIG_HOME, "opencode", "opencode.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(runtimeConfig.mcp).toBeUndefined();
+    expect(prepared.notes.some((n) => n.includes("invalid JSON"))).toBe(true);
+    await prepared.cleanup();
+  });
+
   it("pins small_model from PAPERCLIP_OPENCODE_SMALL_MODEL", async () => {
     const configHome = await makeConfigHome({ permission: { read: "allow" } });
     const prepared = await prepareOpenCodeRuntimeConfig({
