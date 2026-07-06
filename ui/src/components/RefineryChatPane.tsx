@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { EyeOff, Eye, FlaskConical } from "lucide-react";
+import { EyeOff, Eye, FlaskConical, MoreHorizontal, ScanEye } from "lucide-react";
 import type { RefineryMessage, RefineryProposal } from "@paperclipai/shared";
 import { stripRefinerySignals } from "@paperclipai/shared";
 import { refineryApi } from "../api/refinery";
 import { queryKeys } from "../lib/queryKeys";
 import { MarkdownBody } from "./MarkdownBody";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
+import { RefineryContextDrawer } from "./RefineryContextDrawer";
 import {
   Select,
   SelectContent,
@@ -14,16 +15,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
 import { cn } from "../lib/utils";
 
 /**
- * Refinery chat pane (Task 10) — a private, un-company-scoped chat where the
- * user shapes an idea with a model before "finalizing" it into a task/goal/
- * project. Mirrors BoardChat's SSE streaming plumbing (fetch + ReadableStream
- * reader loop) against the refinery-specific endpoint, plus a model picker
- * persisted to localStorage. The `proposal` produced by a `done` event is
- * kept in state for Task 12 to render as a card; Task 11 wires the per-message
- * `onToggleContext` affordance rendered here.
+ * Refinery chat pane (Task 10, extended in Task 11) — a private,
+ * un-company-scoped chat where the user shapes an idea with a model before
+ * "finalizing" it into a task/goal/project. Mirrors BoardChat's SSE streaming
+ * plumbing (fetch + ReadableStream reader loop) against the refinery-specific
+ * endpoint, plus a model picker persisted to localStorage. The `proposal`
+ * produced by a `done` event is kept in state for Task 12 to render as a
+ * card.
+ *
+ * Task 11 (context filter): Task 10 already wired the per-message
+ * `onToggleContext` mutation and an eye/eye-off icon button per bubble. This
+ * pass adds (a) dimmed/struck-through styling on excluded bubbles so
+ * exclusion is visible without hiding the message, (b) a per-bubble "exclude
+ * from here up/down" range action (bulk `toggleContext` calls over the
+ * currently-included slice), and (c) a header "inspect context" button that
+ * opens `RefineryContextDrawer`, which lists exactly the messages the server
+ * will send next (`!contextExcluded`) — the same predicate the pane and the
+ * server's `buildHistory` both use, so drawer contents and the next request
+ * body always agree by construction.
  */
 
 const REFINERY_BUBBLE_SHELL =
@@ -67,6 +86,7 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
   const [errorText, setErrorText] = useState("");
   const [proposal, setProposal] = useState<RefineryProposal | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(() => readStoredModel());
+  const [contextDrawerOpen, setContextDrawerOpen] = useState(false);
 
   const { data: sessions } = useQuery({
     queryKey: queryKeys.refinery.sessions(),
@@ -160,6 +180,30 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
       toggleContextMutation.mutate({ id: messageId, excluded: !contextExcluded });
     },
     [toggleContextMutation],
+  );
+
+  // Range action ("exclude from here up/down"): bulk-toggles every currently
+  // INCLUDED message in the affected slice. Mirrors the single-message
+  // mutation's invalidate-on-settle pattern (no separate optimistic path) so
+  // there's only one cache-update strategy for context toggling in this pane.
+  const rangeExcludeMutation = useMutation({
+    mutationFn: (ids: string[]) =>
+      Promise.all(ids.map((id) => refineryApi.toggleContext(id, true))),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.refinery.messages(sessionId) }),
+  });
+
+  const excludeRange = useCallback(
+    (messageId: string, direction: "up" | "down") => {
+      const list = messages ?? [];
+      const index = list.findIndex((m) => m.id === messageId);
+      if (index === -1) return;
+      const affected = direction === "up" ? list.slice(0, index + 1) : list.slice(index);
+      const ids = affected.filter((m) => !m.contextExcluded).map((m) => m.id);
+      if (ids.length === 0) return;
+      rangeExcludeMutation.mutate(ids);
+    },
+    [messages, rangeExcludeMutation],
   );
 
   const sendMessage = useCallback(
@@ -273,27 +317,47 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
           <FlaskConical className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{currentSession?.title ?? "Refinery session"}</span>
         </div>
-        <Select value={selectedModel ?? undefined} onValueChange={handleModelChange}>
-          <SelectTrigger className="h-8 w-[220px] text-xs" data-testid="refinery-model-select">
-            <SelectValue placeholder="Choose a model" />
-          </SelectTrigger>
-          <SelectContent>
-            {(models ?? []).map((model) => (
-              <SelectItem key={model.id} value={model.id}>
-                {model.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Inspect context"
+            title="Inspect the exact message context the model will receive"
+            data-testid="refinery-inspect-context-button"
+            onClick={() => setContextDrawerOpen(true)}
+          >
+            <ScanEye className="h-4 w-4" />
+          </Button>
+          <Select value={selectedModel ?? undefined} onValueChange={handleModelChange}>
+            <SelectTrigger className="h-8 w-[220px] text-xs" data-testid="refinery-model-select">
+              <SelectValue placeholder="Choose a model" />
+            </SelectTrigger>
+            <SelectContent>
+              {(models ?? []).map((model) => (
+                <SelectItem key={model.id} value={model.id}>
+                  {model.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4" data-testid="refinery-message-list">
         <div className="mx-auto flex max-w-3xl flex-col gap-3">
           {(messages ?? []).map((message) => {
             const isUser = message.role === "user";
+            // Excluded messages stay in the transcript (never hidden) but read
+            // as visibly "struck out" — the same predicate the drawer and the
+            // server's buildHistory use is `!contextExcluded`, so this dimming
+            // is purely presentational and never touches `body`.
+            const excludedBubbleClass = message.contextExcluded && "opacity-50 line-through decoration-1";
             return (
               <div
                 key={message.id}
+                data-testid="refinery-message-row"
+                data-context-excluded={message.contextExcluded}
                 className={cn("group flex items-start gap-1.5", isUser ? "justify-end" : "justify-start")}
               >
                 {!isUser && (
@@ -301,6 +365,7 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
                     className={cn(
                       REFINERY_BUBBLE_SHELL,
                       "bg-card border border-border text-foreground [border-radius:14px_14px_14px_4px]",
+                      excludedBubbleClass,
                     )}
                   >
                     <MarkdownBody className={REFINERY_MARKDOWN_CLASS}>{message.body ?? ""}</MarkdownBody>
@@ -311,23 +376,46 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
                     className={cn(
                       REFINERY_BUBBLE_SHELL,
                       "bg-blue-600 text-white [border-radius:14px_14px_4px_14px]",
+                      excludedBubbleClass,
                     )}
                   >
                     {message.body ?? ""}
                   </div>
                 )}
-                <button
-                  type="button"
-                  aria-label={message.contextExcluded ? "Include in context" : "Exclude from context"}
-                  title={message.contextExcluded ? "Include in context" : "Exclude from context"}
-                  onClick={() => onToggleContext(message.id, message.contextExcluded)}
-                  className={cn(
-                    "mt-2 shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100 text-muted-foreground hover:text-foreground",
-                    message.contextExcluded && "opacity-100 text-amber-600 dark:text-amber-400",
-                  )}
-                >
-                  {message.contextExcluded ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                </button>
+                <div className="mt-2 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                  <button
+                    type="button"
+                    aria-label={message.contextExcluded ? "Include in context" : "Exclude from context"}
+                    title={message.contextExcluded ? "Include in context" : "Exclude from context"}
+                    onClick={() => onToggleContext(message.id, message.contextExcluded)}
+                    className={cn(
+                      "text-muted-foreground hover:text-foreground",
+                      message.contextExcluded && "opacity-100 text-amber-600 dark:text-amber-400",
+                    )}
+                  >
+                    {message.contextExcluded ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="More context actions"
+                        title="More context actions"
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align={isUser ? "end" : "start"}>
+                      <DropdownMenuItem onSelect={() => excludeRange(message.id, "up")}>
+                        Exclude from here up
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => excludeRange(message.id, "down")}>
+                        Exclude from here down
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
             );
           })}
@@ -401,6 +489,12 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
           sendLabel="Send message"
         />
       </div>
+
+      <RefineryContextDrawer
+        open={contextDrawerOpen}
+        onOpenChange={setContextDrawerOpen}
+        messages={messages ?? []}
+      />
     </div>
   );
 }

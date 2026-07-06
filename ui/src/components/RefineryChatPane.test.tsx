@@ -62,6 +62,40 @@ vi.mock("../components/ChatComposer", () => ({
   }),
 }));
 
+vi.mock("@/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+  DropdownMenuContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuItem: ({
+    children,
+    onSelect,
+  }: {
+    children: ReactNode;
+    onSelect?: () => void;
+  }) => (
+    <button type="button" onClick={onSelect}>
+      {children}
+    </button>
+  ),
+}));
+
+vi.mock("@/components/ui/sheet", () => ({
+  Sheet: ({ open, children }: { open: boolean; children: ReactNode }) =>
+    open ? <div data-slot="sheet">{children}</div> : null,
+  SheetContent: ({
+    children,
+    "data-testid": dataTestId,
+  }: {
+    children: ReactNode;
+    side?: string;
+    className?: string;
+    "data-testid"?: string;
+  }) => <div data-testid={dataTestId}>{children}</div>,
+  SheetHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  SheetTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  SheetDescription: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}));
+
 vi.mock("@/components/ui/select", () => ({
   Select: ({
     value,
@@ -631,5 +665,134 @@ describe("RefineryChatPane", () => {
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(consoleErrorSpy).not.toHaveBeenCalledWith("Refinery chat error:", expect.anything());
     consoleErrorSpy.mockRestore();
+  });
+
+  it("toggles a message's exclusion, dims the bubble, and never touches body", async () => {
+    refineryApiMock.listMessages
+      .mockReset()
+      .mockResolvedValueOnce([
+        {
+          id: "m1",
+          sessionId: "session-1",
+          role: "assistant",
+          body: "Here is a suggestion.",
+          model: "model-a",
+          contextExcluded: false,
+          createdAt: "2026-07-01T00:00:00.000Z",
+        },
+      ])
+      // Refetch triggered by the toggle mutation's onSuccess invalidate.
+      .mockResolvedValueOnce([
+        {
+          id: "m1",
+          sessionId: "session-1",
+          role: "assistant",
+          body: "Here is a suggestion.",
+          model: "model-a",
+          contextExcluded: true,
+          createdAt: "2026-07-01T00:00:00.000Z",
+        },
+      ]);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse([])));
+
+    const { root } = renderPane(container);
+    unmounts.push(root);
+
+    await waitForAssertion(() => {
+      expect(container.querySelector('[data-testid="refinery-message-row"]')).not.toBeNull();
+    });
+
+    const toggleButton = container.querySelector(
+      'button[aria-label="Exclude from context"]',
+    ) as HTMLButtonElement;
+    expect(toggleButton).not.toBeNull();
+
+    await act(async () => {
+      toggleButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flush();
+    });
+
+    expect(refineryApiMock.toggleContext).toHaveBeenCalledWith("m1", true);
+
+    await waitForAssertion(() => {
+      const row = container.querySelector('[data-testid="refinery-message-row"]') as HTMLElement;
+      expect(row.getAttribute("data-context-excluded")).toBe("true");
+    });
+
+    const row = container.querySelector('[data-testid="refinery-message-row"]') as HTMLElement;
+    const dimmedBubble = row.querySelector(".opacity-50.line-through");
+    expect(dimmedBubble).not.toBeNull();
+    // Contract: toggling context NEVER alters `body` — the text is still
+    // present verbatim, only its presentation changed.
+    expect(dimmedBubble?.textContent).toContain("Here is a suggestion.");
+  });
+
+  it("drawer lists only included messages, in order, with a total char count", async () => {
+    refineryApiMock.listMessages.mockReset().mockResolvedValue([
+      {
+        id: "m1",
+        sessionId: "session-1",
+        role: "user",
+        body: "First idea",
+        model: null,
+        contextExcluded: false,
+        createdAt: "2026-07-01T00:00:00.000Z",
+      },
+      {
+        id: "m2",
+        sessionId: "session-1",
+        role: "assistant",
+        body: "Excluded reply",
+        model: "model-a",
+        contextExcluded: true,
+        createdAt: "2026-07-01T00:00:01.000Z",
+      },
+      {
+        id: "m3",
+        sessionId: "session-1",
+        role: "assistant",
+        body: "Second reply",
+        model: "model-a",
+        contextExcluded: false,
+        createdAt: "2026-07-01T00:00:02.000Z",
+      },
+    ]);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse([])));
+
+    const { root } = renderPane(container);
+    unmounts.push(root);
+
+    await waitForAssertion(() => {
+      expect(container.querySelectorAll('[data-testid="refinery-message-row"]').length).toBe(3);
+    });
+
+    expect(container.querySelector('[data-testid="refinery-context-drawer"]')).toBeNull();
+
+    const openButton = container.querySelector(
+      '[data-testid="refinery-inspect-context-button"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      openButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flush();
+    });
+
+    await waitForAssertion(() => {
+      expect(container.querySelector('[data-testid="refinery-context-drawer"]')).not.toBeNull();
+    });
+
+    const rows = container.querySelectorAll('[data-testid="refinery-context-drawer-row"]');
+    expect(rows.length).toBe(2);
+    expect(rows[0].textContent).toContain("First idea");
+    expect(rows[1].textContent).toContain("Second reply");
+
+    const drawer = container.querySelector('[data-testid="refinery-context-drawer"]');
+    expect(drawer?.textContent).not.toContain("Excluded reply");
+
+    const expectedChars = "First idea".length + "Second reply".length;
+    const charCount = container.querySelector('[data-testid="refinery-context-drawer-char-count"]');
+    expect(charCount?.textContent).toContain(String(expectedChars));
+    expect(charCount?.textContent).toContain("2 messages");
   });
 });
