@@ -10,6 +10,7 @@ import {
   updateRefinerySessionSchema,
   extractRefineryProposal,
   stripRefinerySignals,
+  createStreamingSignalStripper,
   REFINERY_PROPOSAL_KINDS,
 } from "@paperclipai/shared";
 import { z } from "zod";
@@ -175,15 +176,23 @@ export function refineryRoutes(db: Db) {
     res.flushHeaders();
     res.write(`data: ${JSON.stringify({ type: "start" })}\n\n`);
 
+    const ac = new AbortController();
+    res.on("close", () => ac.abort());
+
+    const streamStripper = createStreamingSignalStripper();
+
     liveRefineryChats += 1;
-    const runtime = await prepareRefineryOpencodeEnv();
+    let runtime: Awaited<ReturnType<typeof prepareRefineryOpencodeEnv>> | undefined;
     try {
+      runtime = await prepareRefineryOpencodeEnv();
       const result = await runRefineryRelay({
         model,
         prompt,
         env: runtime.env,
+        signal: ac.signal,
         onChunk: (text) => {
-          if (res.writable) res.write(`data: ${JSON.stringify({ type: "chunk", text })}\n\n`);
+          const safe = streamStripper.push(text);
+          if (safe && res.writable) res.write(`data: ${JSON.stringify({ type: "chunk", text: safe })}\n\n`);
         },
         onStatus: (text) => {
           if (res.writable) res.write(`data: ${JSON.stringify({ type: "status", text })}\n\n`);
@@ -195,6 +204,8 @@ export function refineryRoutes(db: Db) {
       if (cleaned) await svc.addMessage(session.id, { role: "assistant", body: cleaned, model });
 
       if (res.writable) {
+        const trailing = streamStripper.flush();
+        if (trailing) res.write(`data: ${JSON.stringify({ type: "chunk", text: trailing })}\n\n`);
         if (!cleaned && result.exitCode !== 0) {
           res.write(
             `data: ${JSON.stringify({
@@ -208,7 +219,7 @@ export function refineryRoutes(db: Db) {
       }
     } finally {
       liveRefineryChats -= 1;
-      await runtime.cleanup().catch(() => {});
+      if (runtime) await runtime.cleanup().catch(() => {});
     }
   });
 

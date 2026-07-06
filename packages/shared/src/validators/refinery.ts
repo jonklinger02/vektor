@@ -79,3 +79,40 @@ export function extractRefineryProposal(text: string): RefineryProposal | null {
 export function stripRefinerySignals(text: string): string {
   return text.replace(SIGNAL_RE, "").replace(DANGLING_SIGNAL_RE, "").trim();
 }
+
+const SIGNAL_OPEN = "%%ACTIONS%%";
+function partialMarkerHoldback(s: string, marker: string): number {
+  const max = Math.min(s.length, marker.length - 1);
+  for (let n = max; n > 0; n--) {
+    if (s.slice(s.length - n) === marker.slice(0, n)) return n;
+  }
+  return 0;
+}
+/**
+ * Incremental signal stripper for streaming: feed raw model deltas, get back
+ * only text safe to display (never a partial or whole %%ACTIONS%% block).
+ */
+export function createStreamingSignalStripper() {
+  let buf = "";
+  return {
+    push(raw: string): string {
+      buf += raw;
+      buf = buf.replace(/%%ACTIONS%%[\s\S]*?%%\/ACTIONS%%/g, "");
+      const open = buf.indexOf(SIGNAL_OPEN);
+      if (open !== -1) {
+        const safe = buf.slice(0, open);
+        buf = buf.slice(open);
+        return safe;
+      }
+      const hold = partialMarkerHoldback(buf, SIGNAL_OPEN);
+      const safe = hold ? buf.slice(0, buf.length - hold) : buf;
+      buf = hold ? buf.slice(buf.length - hold) : "";
+      return safe;
+    },
+    flush(): string {
+      const out = buf.replace(/%%ACTIONS%%[\s\S]*$/, "");
+      buf = "";
+      return out;
+    },
+  };
+}

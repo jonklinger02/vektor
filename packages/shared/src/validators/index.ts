@@ -462,6 +462,7 @@ export {
   type RefineryProposal,
   extractRefineryProposal,
   stripRefinerySignals,
+  createStreamingSignalStripper,
 } from "./refinery.js";
 
 export {

@@ -1054,6 +1054,7 @@ export {
   type RefineryProposal,
   extractRefineryProposal,
   stripRefinerySignals,
+  createStreamingSignalStripper,
 } from "./validators/index.js";
 
 export {

@@ -210,15 +210,18 @@ describe.sequential("refinery routes", () => {
     mockRefineryService.buildHistory.mockResolvedValue([
       { role: "user", body: "Let's plan a thing" },
     ]);
+    const signalBlock = `%%ACTIONS%%${JSON.stringify({
+      proposal: { kind: "task", title: "Ship the thing", description: "Do it.", priority: "medium" },
+    })}%%/ACTIONS%%`;
+    // Split the signal block across two onChunk calls to hit the boundary
+    // where the streaming stripper must hold back a partial marker.
+    const splitAt = signalBlock.indexOf('"proposal"');
     mockRunRefineryRelay.mockImplementation(async (opts: any) => {
       opts.onChunk("Sounds good, ");
-      opts.onChunk("here's the plan.");
+      opts.onChunk("here's the plan." + signalBlock.slice(0, splitAt));
+      opts.onChunk(signalBlock.slice(splitAt));
       return {
-        fullText:
-          "Sounds good, here's the plan." +
-          `%%ACTIONS%%${JSON.stringify({
-            proposal: { kind: "task", title: "Ship the thing", description: "Do it.", priority: "medium" },
-          })}%%/ACTIONS%%`,
+        fullText: "Sounds good, here's the plan." + signalBlock,
         exitCode: 0,
         stderrTail: "",
       };
@@ -232,7 +235,7 @@ describe.sequential("refinery routes", () => {
     );
 
     expect(res.status).toBe(200);
-    expect((res.text.match(/"type":"chunk"/g) ?? []).length).toBe(2);
+    expect(res.text).not.toContain("%%ACTIONS%%");
 
     const doneLine = res.text.split("\n").find((line) => line.includes('"type":"done"'));
     expect(doneLine).toBeDefined();

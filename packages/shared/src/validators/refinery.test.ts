@@ -3,6 +3,7 @@ import {
   extractRefineryProposal,
   stripRefinerySignals,
   refineryChatRequestSchema,
+  createStreamingSignalStripper,
 } from "./refinery.js";
 
 describe("refinery signals", () => {
@@ -35,5 +36,49 @@ describe("refinery signals", () => {
   it("chat request requires message and model", () => {
     expect(refineryChatRequestSchema.safeParse({ message: "hi", model: "ollama/gpt-oss:20b" }).success).toBe(true);
     expect(refineryChatRequestSchema.safeParse({ message: "" }).success).toBe(false);
+  });
+});
+
+describe("createStreamingSignalStripper", () => {
+  it("never emits a signal or a fragment of it when the marker is split across pushes", () => {
+    const stripper = createStreamingSignalStripper();
+    const pushes = [
+      "%%ACTI",
+      `ONS%%${JSON.stringify({ proposal: { kind: "task", title: "x", description: "y" } })}%%/ACT`,
+      "IONS%%tail",
+    ];
+
+    let out = "";
+    for (const p of pushes) {
+      const safe = stripper.push(p);
+      expect(safe).not.toContain("%%ACTIONS%%");
+      // A held-back partial marker must never be handed out as a trailing
+      // fragment either — e.g. "...%%ACTI" must not be returned as-is.
+      for (let n = 1; n < "%%ACTIONS%%".length; n++) {
+        expect(safe.endsWith("%%ACTIONS%%".slice(0, n))).toBe(false);
+      }
+      out += safe;
+    }
+    out += stripper.flush();
+
+    expect(out).toBe("tail");
+  });
+
+  it("passes plain text through unchanged across push boundaries", () => {
+    const stripper = createStreamingSignalStripper();
+    const parts = ["Hello ", "there, ", "how are ", "you?"];
+    let out = "";
+    for (const p of parts) out += stripper.push(p);
+    out += stripper.flush();
+    expect(out).toBe(parts.join(""));
+  });
+
+  it("eventually emits a literal %% that never becomes a signal, via flush", () => {
+    const stripper = createStreamingSignalStripper();
+    let out = "";
+    out += stripper.push("50%");
+    out += stripper.push("% done");
+    out += stripper.flush();
+    expect(out).toBe("50%% done");
   });
 });

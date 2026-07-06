@@ -10,6 +10,7 @@ export interface RelayOptions {
   onChunk(text: string): void;
   onStatus(text: string): void;
   spawnFn?: typeof spawn;
+  signal?: AbortSignal;
 }
 
 /**
@@ -35,6 +36,11 @@ export function runRefineryRelay(opts: RelayOptions): Promise<{
       cwd: "/tmp",
       env: opts.env,
     });
+
+    if (opts.signal) {
+      if (opts.signal.aborted) proc.kill("SIGTERM");
+      else opts.signal.addEventListener("abort", () => proc.kill("SIGTERM"), { once: true });
+    }
 
     let fullText = "";
     let stderrTail = "";
