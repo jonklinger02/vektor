@@ -5,6 +5,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RefineryProposal } from "@paperclipai/shared";
+import { ISSUE_PRIORITIES } from "@paperclipai/shared";
 import { RefineryProposalCard } from "./RefineryProposalCard";
 
 /**
@@ -163,7 +164,7 @@ describe("RefineryProposalCard", () => {
     const priorityWrapper = q<HTMLDivElement>('[data-testid="refinery-proposal-priority-select"]');
     const prioritySelect = priorityWrapper.querySelector("select") as HTMLSelectElement;
     act(() => {
-      setSelectValue(prioritySelect, "urgent");
+      setSelectValue(prioritySelect, "high");
     });
 
     const createButton = q<HTMLButtonElement>('[data-testid="refinery-proposal-create-button"]');
@@ -175,8 +176,13 @@ describe("RefineryProposalCard", () => {
     expect(issuesApiMock.create).toHaveBeenCalledWith("company-1", {
       title: "Ship the widget v2",
       description: "Updated description",
-      priority: "urgent",
+      priority: "high",
     });
+    // The server's ISSUE_PRIORITIES enum ("critical"/"high"/"medium"/"low")
+    // is the only valid set — "urgent" (the old, non-existent value) is
+    // rejected server-side, so the payload must be a real member.
+    const sentPriority = issuesApiMock.create.mock.calls[0][1].priority;
+    expect(ISSUE_PRIORITIES).toContain(sentPriority);
     expect(refineryApiMock.recordFinalized).toHaveBeenCalledWith("session-1", {
       kind: "task",
       entityId: "issue-1",
@@ -246,5 +252,94 @@ describe("RefineryProposalCard", () => {
     const titleInput = q<HTMLInputElement>('[data-testid="refinery-proposal-title-input"]');
     expect(titleInput.value).toBe("Ship the widget");
     expect(titleInput.disabled).toBe(false);
+  });
+
+  it("switching kind to goal calls goalsApi with a valid GOAL_LEVEL selected from the level select", async () => {
+    goalsApiMock.create.mockResolvedValue({ id: "goal-1" });
+    refineryApiMock.recordFinalized.mockResolvedValue({ id: "session-1" });
+
+    const onDone = vi.fn();
+    renderCard({ proposal: baseProposal(), onDone, onDismiss: vi.fn() });
+
+    const goalToggle = q<HTMLButtonElement>('[data-testid="refinery-proposal-kind-goal"]');
+    act(() => {
+      goalToggle.click();
+    });
+
+    // The level field is a constrained select over the server's GOAL_LEVELS
+    // enum ("company"/"team"/"agent"/"task"), not freeform text.
+    const levelWrapper = q<HTMLDivElement>('[data-testid="refinery-proposal-level-input"]');
+    const levelSelect = levelWrapper.querySelector("select") as HTMLSelectElement;
+    act(() => {
+      setSelectValue(levelSelect, "team");
+    });
+
+    const createButton = q<HTMLButtonElement>('[data-testid="refinery-proposal-create-button"]');
+    act(() => {
+      createButton.click();
+    });
+    await flush();
+
+    expect(goalsApiMock.create).toHaveBeenCalledWith("company-1", {
+      title: "Ship the widget",
+      description: "Build and ship the widget end to end.",
+      level: "team",
+    });
+    expect(refineryApiMock.recordFinalized).toHaveBeenCalledWith("session-1", {
+      kind: "goal",
+      entityId: "goal-1",
+      companyId: "company-1",
+    });
+    expect(onDone).toHaveBeenCalledWith({
+      kind: "goal",
+      entityId: "goal-1",
+      companyId: "company-1",
+    });
+  });
+
+  it("retries idempotently after a post-create recordFinalized failure — no duplicate entity", async () => {
+    issuesApiMock.create.mockResolvedValue({ id: "issue-1" });
+    // First attempt: entity gets created, but recordFinalized rejects — the
+    // card must surface an error without ever having called onDone. Second
+    // attempt (the user clicking Create again): recordFinalized succeeds.
+    refineryApiMock.recordFinalized
+      .mockRejectedValueOnce(new Error("Finalize record failed"))
+      .mockResolvedValueOnce({ id: "session-1" });
+
+    const onDone = vi.fn();
+    renderCard({ proposal: baseProposal(), onDone, onDismiss: vi.fn() });
+
+    const createButton = q<HTMLButtonElement>('[data-testid="refinery-proposal-create-button"]');
+
+    act(() => {
+      createButton.click();
+    });
+    await flush();
+
+    const errorEl = q<HTMLParagraphElement>('[data-testid="refinery-proposal-error"]');
+    expect(errorEl.textContent).toContain("Finalize record failed");
+    expect(onDone).not.toHaveBeenCalled();
+    expect(issuesApiMock.create).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      createButton.click();
+    });
+    await flush();
+
+    // The create API must NOT have been called again — the retry reuses the
+    // entity id from the first (successful) create attempt.
+    expect(issuesApiMock.create).toHaveBeenCalledTimes(1);
+    expect(refineryApiMock.recordFinalized).toHaveBeenCalledTimes(2);
+    expect(refineryApiMock.recordFinalized).toHaveBeenLastCalledWith("session-1", {
+      kind: "task",
+      entityId: "issue-1",
+      companyId: "company-1",
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onDone).toHaveBeenCalledWith({
+      kind: "task",
+      entityId: "issue-1",
+      companyId: "company-1",
+    });
   });
 });

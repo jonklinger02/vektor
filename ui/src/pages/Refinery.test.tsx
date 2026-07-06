@@ -21,6 +21,7 @@ const refineryApiMock = vi.hoisted(() => ({
 
 vi.mock("../context/CompanyContext", () => ({
   useCompany: () => companyState,
+  useOptionalCompany: () => companyState,
 }));
 
 vi.mock("../api/refinery", () => ({

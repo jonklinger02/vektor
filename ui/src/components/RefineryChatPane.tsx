@@ -5,6 +5,7 @@ import type { RefineryMessage, RefineryProposal } from "@paperclipai/shared";
 import { stripRefinerySignals } from "@paperclipai/shared";
 import { Link } from "@/lib/router";
 import { refineryApi } from "../api/refinery";
+import { useOptionalCompany } from "../context/CompanyContext";
 import { queryKeys } from "../lib/queryKeys";
 import { MarkdownBody } from "./MarkdownBody";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
@@ -58,12 +59,36 @@ const REFINERY_MODEL_STORAGE_KEY = "paperclip.refineryModel";
 const FINALIZE_MESSAGE =
   "Please finalize: emit the proposal signal for the plan as refined so far.";
 
-/** Where the finalized-entity success chip should link, by proposal kind. */
+/**
+ * Where the finalized-entity success chip should link, by proposal kind.
+ * Bare (company-unprefixed) paths — see `resolveFinalizedEntityHref` below,
+ * which prefixes with the *chosen* company's own prefix rather than relying
+ * on the app's ambient globally-selected company (Refinery predates any
+ * particular company selection and the two can legitimately differ).
+ */
 const FINALIZED_ENTITY_LINK: Record<string, (entityId: string) => string> = {
   task: (entityId) => `/issues/${entityId}`,
   project: (entityId) => `/projects/${entityId}`,
   goal: () => "/goals",
 };
+
+/**
+ * Fix 4: resolve the finalized chip's link explicitly against the company
+ * the user actually created the entity under, rather than the app's ambient
+ * `selectedCompanyId` (which the custom `Link` component would otherwise
+ * fall back to for a bare path, and which can differ from the company
+ * chosen in the proposal card — producing a 404 under the wrong company).
+ * Looking up the target company's own `issuePrefix` and prefixing the path
+ * directly sidesteps that without any global-state side effects.
+ */
+function resolveFinalizedEntityHref(
+  chip: { kind: string; entityId: string; companyId: string },
+  companies: Array<{ id: string; issuePrefix: string }>,
+): string {
+  const bareHref = FINALIZED_ENTITY_LINK[chip.kind]?.(chip.entityId) ?? "#";
+  const targetCompany = companies.find((company) => company.id === chip.companyId);
+  return targetCompany ? `/${targetCompany.issuePrefix}${bareHref}` : bareHref;
+}
 
 function readStoredModel(): string | null {
   try {
@@ -87,6 +112,10 @@ export interface RefineryChatPaneProps {
 
 export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
   const queryClient = useQueryClient();
+  // Non-throwing: some test/embed surfaces render this pane without a
+  // CompanyProvider. Used only to resolve the finalized-entity chip link
+  // below (Fix 4) — everything else in this pane is company-agnostic.
+  const companies = useOptionalCompany()?.companies ?? [];
   const composerRef = useRef<ChatComposerHandle>(null);
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -513,7 +542,7 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
             >
               <span>Created a {finalizedChip.kind}.</span>
               <Link
-                to={FINALIZED_ENTITY_LINK[finalizedChip.kind]?.(finalizedChip.entityId) ?? "#"}
+                to={resolveFinalizedEntityHref(finalizedChip, companies)}
                 className="font-medium text-foreground hover:underline"
               >
                 View it →

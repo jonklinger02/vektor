@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RefineryProposal, RefineryProposalKind } from "@paperclipai/shared";
+import { GOAL_LEVELS, ISSUE_PRIORITIES } from "@paperclipai/shared";
 import { issuesApi } from "../api/issues";
 import { goalsApi } from "../api/goals";
 import { projectsApi } from "../api/projects";
@@ -34,7 +35,15 @@ const KIND_OPTIONS: { value: RefineryProposalKind; label: string }[] = [
   { value: "project", label: "Project" },
 ];
 
-const PRIORITY_OPTIONS = ["low", "medium", "high", "urgent"] as const;
+function defaultPriority(priority: string | undefined): string {
+  return priority && (ISSUE_PRIORITIES as readonly string[]).includes(priority)
+    ? priority
+    : "medium";
+}
+
+function defaultLevel(level: string | undefined): string {
+  return level && (GOAL_LEVELS as readonly string[]).includes(level) ? level : "task";
+}
 
 export interface RefineryProposalCardProps {
   proposal: RefineryProposal;
@@ -55,10 +64,19 @@ export function RefineryProposalCard({
   const [description, setDescription] = useState(proposal.description);
   const [kind, setKind] = useState<RefineryProposalKind>(proposal.kind);
   const [companyId, setCompanyId] = useState<string>(selectedCompanyId ?? "");
-  const [priority, setPriority] = useState<string>(proposal.priority ?? "medium");
-  const [level, setLevel] = useState<string>(proposal.level ?? "");
+  const [priority, setPriority] = useState<string>(defaultPriority(proposal.priority));
+  const [level, setLevel] = useState<string>(defaultLevel(proposal.level));
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+
+  // Fix 3 (idempotent retry): once `handleCreate` successfully creates an
+  // entity, its id is tracked here so a retry after a post-create failure
+  // (see below) skips the create call entirely instead of creating a
+  // duplicate. Reset whenever the user changes kind or company, since that
+  // means a genuinely different target entity.
+  const createdEntityIdRef = useRef<{ kind: RefineryProposalKind; companyId: string; entityId: string } | null>(
+    null,
+  );
 
   // A fresh `done` event hands us a brand-new proposal object — resync the
   // editable fields (and clear any stale error) whenever that happens. This
@@ -68,14 +86,25 @@ export function RefineryProposalCard({
     setTitle(proposal.title);
     setDescription(proposal.description);
     setKind(proposal.kind);
-    setPriority(proposal.priority ?? "medium");
-    setLevel(proposal.level ?? "");
+    setPriority(defaultPriority(proposal.priority));
+    setLevel(defaultLevel(proposal.level));
     setError(null);
+    createdEntityIdRef.current = null;
   }, [proposal]);
 
   useEffect(() => {
     setCompanyId((current) => current || selectedCompanyId || "");
   }, [selectedCompanyId]);
+
+  function handleKindChange(next: RefineryProposalKind) {
+    if (next !== kind) createdEntityIdRef.current = null;
+    setKind(next);
+  }
+
+  function handleCompanyChange(next: string) {
+    if (next !== companyId) createdEntityIdRef.current = null;
+    setCompanyId(next);
+  }
 
   async function handleCreate() {
     if (!companyId) {
@@ -91,13 +120,20 @@ export function RefineryProposalCard({
     setError(null);
     try {
       let entityId: string;
-      if (kind === "task") {
+      const existing = createdEntityIdRef.current;
+      if (existing && existing.kind === kind && existing.companyId === companyId) {
+        // A prior attempt already created the entity — recordFinalized must
+        // have thrown after that. Skip the create call so retrying never
+        // double-creates, and go straight to (re)recording finalization.
+        entityId = existing.entityId;
+      } else if (kind === "task") {
         const created = await issuesApi.create(companyId, {
           title,
           description,
           priority,
         });
         entityId = created.id;
+        createdEntityIdRef.current = { kind, companyId, entityId };
       } else if (kind === "goal") {
         const created = await goalsApi.create(companyId, {
           title,
@@ -105,12 +141,14 @@ export function RefineryProposalCard({
           ...(level ? { level } : {}),
         });
         entityId = created.id;
+        createdEntityIdRef.current = { kind, companyId, entityId };
       } else {
         const created = await projectsApi.create(companyId, {
           name: title,
           description,
         });
         entityId = created.id;
+        createdEntityIdRef.current = { kind, companyId, entityId };
       }
 
       await refineryApi.recordFinalized(sessionId, { kind, entityId, companyId });
@@ -144,7 +182,7 @@ export function RefineryProposalCard({
               role="radio"
               aria-checked={kind === option.value}
               data-testid={`refinery-proposal-kind-${option.value}`}
-              onClick={() => setKind(option.value)}
+              onClick={() => handleKindChange(option.value)}
               className={cn(
                 "rounded px-2 py-1 text-xs font-medium transition-colors",
                 kind === option.value
@@ -187,7 +225,7 @@ export function RefineryProposalCard({
         <div className="flex min-w-[10rem] flex-1 flex-col gap-1">
           <span className="text-xs text-muted-foreground">Company</span>
           <div data-testid="refinery-proposal-company-select">
-            <Select value={companyId || undefined} onValueChange={setCompanyId}>
+            <Select value={companyId || undefined} onValueChange={handleCompanyChange}>
               <SelectTrigger className="h-9 w-full text-xs">
                 <SelectValue placeholder="Choose a company" />
               </SelectTrigger>
@@ -211,7 +249,7 @@ export function RefineryProposalCard({
                   <SelectValue placeholder="Priority" />
                 </SelectTrigger>
                 <SelectContent>
-                  {PRIORITY_OPTIONS.map((option) => (
+                  {ISSUE_PRIORITIES.map((option) => (
                     <SelectItem key={option} value={option}>
                       {option}
                     </SelectItem>
@@ -224,15 +262,21 @@ export function RefineryProposalCard({
 
         {kind === "goal" && (
           <div className="flex min-w-[8rem] flex-1 flex-col gap-1">
-            <label htmlFor="refinery-proposal-level" className="text-xs text-muted-foreground">
-              Level
-            </label>
-            <Input
-              id="refinery-proposal-level"
-              data-testid="refinery-proposal-level-input"
-              value={level}
-              onChange={(e) => setLevel(e.target.value)}
-            />
+            <span className="text-xs text-muted-foreground">Level</span>
+            <div data-testid="refinery-proposal-level-input">
+              <Select value={level} onValueChange={setLevel}>
+                <SelectTrigger className="h-9 w-full text-xs">
+                  <SelectValue placeholder="Level" />
+                </SelectTrigger>
+                <SelectContent>
+                  {GOAL_LEVELS.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         )}
       </div>
