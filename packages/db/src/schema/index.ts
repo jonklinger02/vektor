@@ -105,3 +105,5 @@ export { companyHeartbeatConfigs } from "./company_heartbeat_configs.js";
 export { routingConfigVersions, routingDecisionAudit } from "./routing_config_versions.js";
 export { agentLearnings } from "./agent_learnings.js";
 export { auditEvents } from "./audit_events.js";
+export { refinerySessions } from "./refinery_sessions.js";
+export { refineryMessages } from "./refinery_messages.js";
