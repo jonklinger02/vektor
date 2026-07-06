@@ -189,4 +189,36 @@ describe.sequential("refinery routes", () => {
     expect(res.status).toBe(401);
     expect(mockRefineryService.listSessions).not.toHaveBeenCalled();
   });
+
+  it("401 before existence check on message-context route", async () => {
+    const app = await createApp({ type: "none", source: "none" });
+    const res = await requestApp(app, (baseUrl) =>
+      request(baseUrl).patch("/api/refinery/messages/m-x/context").send({ contextExcluded: true }),
+    );
+
+    expect(res.status).toBe(401);
+    expect(mockRefineryService.getMessage).not.toHaveBeenCalled();
+  });
+
+  it("identical 404 bodies for nonexistent vs foreign-owned message", async () => {
+    const app = await createApp();
+
+    // Case A: getMessage returns null
+    mockRefineryService.getMessage.mockResolvedValueOnce(null);
+    const resA = await requestApp(app, (baseUrl) =>
+      request(baseUrl).patch("/api/refinery/messages/m-x/context").send({ contextExcluded: true }),
+    );
+
+    // Case B: getMessage exists but session is foreign-owned
+    mockRefineryService.getMessage.mockResolvedValueOnce({ id: "m-2", sessionId: "s-2" });
+    mockRefineryService.getSession.mockResolvedValueOnce({ id: "s-2", ownerUserId: "user-2" });
+    const resB = await requestApp(app, (baseUrl) =>
+      request(baseUrl).patch("/api/refinery/messages/m-2/context").send({ contextExcluded: true }),
+    );
+
+    expect(resA.status).toBe(404);
+    expect(resB.status).toBe(404);
+    expect(resA.body).toEqual(resB.body);
+    expect(mockRefineryService.setMessageContextExcluded).not.toHaveBeenCalled();
+  });
 });

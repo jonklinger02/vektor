@@ -59,9 +59,11 @@ export function refineryRoutes(db: Db) {
   });
 
   router.patch("/refinery/messages/:id/context", validate(refineryContextToggleSchema), async (req, res) => {
+    const userId = requireUserId(req);
     const message = await svc.getMessage(req.params.id as string);
     if (!message) throw notFound("Message not found");
-    await ownSession(req, message.sessionId); // 404s on foreign ownership
+    const session = await svc.getSession(message.sessionId);
+    if (!session || session.ownerUserId !== userId) throw notFound("Message not found");
     res.json(await svc.setMessageContextExcluded(req.params.id as string, req.body.contextExcluded));
   });
 
