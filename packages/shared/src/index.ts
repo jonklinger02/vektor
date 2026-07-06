@@ -1040,6 +1040,23 @@ export {
 } from "./validators/index.js";
 
 export {
+  REFINERY_SESSION_STATUSES,
+  REFINERY_PROPOSAL_KINDS,
+  type RefineryProposalKind,
+  type RefinerySession,
+  type RefineryMessage,
+  type RefineryModelOption,
+  createRefinerySessionSchema,
+  updateRefinerySessionSchema,
+  refineryChatRequestSchema,
+  refineryContextToggleSchema,
+  refineryProposalSchema,
+  type RefineryProposal,
+  extractRefineryProposal,
+  stripRefinerySignals,
+} from "./validators/index.js";
+
+export {
   createCompanySchema,
   updateCompanySchema,
   updateCompanyBrandingSchema,
