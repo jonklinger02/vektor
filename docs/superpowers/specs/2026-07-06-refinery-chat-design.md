@@ -80,13 +80,20 @@ Chat relay:
 - Concurrency cap: 3 simultaneous relay processes (shared pattern with
   board chat); excess requests get SSE `error` "busy".
 
-Agentic reads: the spawned process receives `PAPERCLIP_API_URL`
-(loopback address of this server) and `PAPERCLIP_API_KEY`. Preferred: a
-**read-scoped** board API key minted for the session owner. If the
-`board_api_keys` model cannot express read-only scope at implementation
-time, fall back to a standard key and record a follow-up hardening item —
-the skill additionally instructs read-only behavior either way, and entity
-creation never flows through the model in any case.
+Agentic reads — **revised for the authenticated deployment** (2026-07-06,
+during planning): the existing board chat is deliberately gated to
+`local_trusted` mode because a spawned CLI with tool permissions is the
+server operator's shell; CT111 runs `authenticated` mode with the service
+as root, so giving the model bash/curl would hand a root shell to any
+signed-in user via prompt injection. Therefore v1 spawns opencode with
+**all tools denied** (permission: bash/edit/webfetch = deny — a pure
+inference relay), and instance awareness comes from a **server-injected
+context pack**: before each turn the relay fetches, with the session
+owner's own authorization, compact listings of companies, agents,
+projects, and goals, and appends them to the system prompt. The model
+"knows the org" — the benefit the agentic option was chosen for — with
+zero tool attack surface. True read-tools via a scoped MCP endpoint are
+a v2 follow-up. Entity creation never flows through the model in any case.
 
 ## UI
 
