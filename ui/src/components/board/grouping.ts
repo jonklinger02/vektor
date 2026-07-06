@@ -19,7 +19,10 @@ export function isUrgent(priority: IssuePriority): boolean {
   return URGENT.has(priority);
 }
 
-export function quadrantOf(priority: IssuePriority, importance: IssueImportance | null): Quadrant | null {
+export function quadrantOf(
+  priority: IssuePriority,
+  importance: IssueImportance | null | undefined,
+): Quadrant | null {
   if (importance == null) return null;
   const urgent = isUrgent(priority);
   if (importance === "important") return urgent ? "do" : "schedule";
