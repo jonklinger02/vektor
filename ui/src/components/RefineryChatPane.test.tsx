@@ -319,4 +319,151 @@ describe("RefineryChatPane", () => {
       expect(alert?.textContent).toContain("The model relay timed out.");
     });
   });
+
+  it("aborts the in-flight stream request when the sessionId changes, so a late event can never repaint the new session", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue(
+      mockOpenFetchResponse([JSON.stringify({ type: "chunk", text: "stale session-1 reply" })]),
+    );
+
+    const root = createRoot(container);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    flushSync(() => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <RefineryChatPane sessionId="session-1" />
+        </QueryClientProvider>,
+      );
+    });
+    unmounts.push(root);
+
+    await waitForAssertion(() => {
+      expect(container.querySelector('[data-testid="refinery-model-select"]')).not.toBeNull();
+    });
+
+    const textarea = container.querySelector('[data-testid="chat-composer-input"]') as HTMLTextAreaElement;
+    flushSync(() => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      nativeSetter.call(textarea, "Refine this idea");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await waitForAssertion(() => {
+      const sendButton = container.querySelector('[data-testid="chat-composer-send"]') as HTMLButtonElement;
+      expect(sendButton.disabled).toBe(false);
+    });
+
+    const sendButton = container.querySelector('[data-testid="chat-composer-send"]') as HTMLButtonElement;
+    await act(async () => {
+      sendButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flush();
+    });
+
+    await waitForAssertion(() => {
+      expect(container.textContent).toContain("stale session-1 reply");
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const signal = requestInit.signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+
+    // Switch this same instance to a different session — mirrors the
+    // defense-in-depth cleanup inside RefineryChatPane itself (the parent
+    // page additionally remounts via `key={sessionId}`, which this render
+    // path deliberately doesn't exercise, so the assertion below is about
+    // the pane's own AbortController cleanup, not the remount).
+    await act(async () => {
+      flushSync(() => {
+        root.render(
+          <QueryClientProvider client={queryClient}>
+            <RefineryChatPane sessionId="session-2" />
+          </QueryClientProvider>,
+        );
+      });
+      await flush();
+    });
+
+    await waitForAssertion(() => {
+      expect(signal.aborted).toBe(true);
+    });
+
+    // The old session's streamed text must not survive into the new
+    // session's render (per-session state reset).
+    await waitForAssertion(() => {
+      expect(container.textContent).not.toContain("stale session-1 reply");
+    });
+  });
+
+  it("keeps the optimistic user bubble visible with no gap until the refetched messages list contains it", async () => {
+    let resolveRefetchedMessages: (value: unknown[]) => void = () => {};
+    refineryApiMock.listMessages
+      .mockReset()
+      .mockResolvedValueOnce([]) // initial mount fetch
+      .mockImplementationOnce(
+        () => new Promise((resolve) => { resolveRefetchedMessages = resolve; }),
+      ); // refetch triggered by the `done` event's invalidateQueries
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue(mockFetchResponse([JSON.stringify({ type: "done", proposal: null })]));
+
+    function countBubbles(text: string): number {
+      return Array.from(container.querySelectorAll("div")).filter(
+        (el) => el.children.length === 0 && el.textContent === text,
+      ).length;
+    }
+
+    const { root } = renderPane(container);
+    unmounts.push(root);
+
+    await waitForAssertion(() => {
+      expect(container.querySelector('[data-testid="refinery-model-select"]')).not.toBeNull();
+    });
+
+    const textarea = container.querySelector('[data-testid="chat-composer-input"]') as HTMLTextAreaElement;
+    flushSync(() => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      nativeSetter.call(textarea, "New idea to refine");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await waitForAssertion(() => {
+      const sendButton = container.querySelector('[data-testid="chat-composer-send"]') as HTMLButtonElement;
+      expect(sendButton.disabled).toBe(false);
+    });
+
+    const sendButton = container.querySelector('[data-testid="chat-composer-send"]') as HTMLButtonElement;
+    await act(async () => {
+      sendButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flush();
+    });
+
+    // The stream has already completed (`done` fired, `sending` cleared) but
+    // the refetch of the messages query hasn't resolved yet — the optimistic
+    // bubble must still be the one and only rendering of this text. Clearing
+    // it eagerly in `finally` (the bug this test guards against) would drop
+    // this to zero here, producing a visible gap.
+    await waitForAssertion(() => {
+      expect(countBubbles("New idea to refine")).toBe(1);
+    });
+
+    // Now let the refetch resolve with the persisted, server-side message.
+    resolveRefetchedMessages([
+      {
+        id: "m1",
+        sessionId: "session-1",
+        role: "user",
+        body: "New idea to refine",
+        model: null,
+        contextExcluded: false,
+        createdAt: "2026-07-01T00:00:01.000Z",
+      },
+    ]);
+
+    // Settles back to exactly one bubble (the optimistic one handed off
+    // cleanly to the persisted message) — never zero, never two.
+    await waitForAssertion(() => {
+      expect(countBubbles("New idea to refine")).toBe(1);
+    });
+  });
 });

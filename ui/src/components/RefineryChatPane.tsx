@@ -57,6 +57,7 @@ export interface RefineryChatPaneProps {
 export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
   const queryClient = useQueryClient();
   const composerRef = useRef<ChatComposerHandle>(null);
+  const controllerRef = useRef<AbortController | null>(null);
 
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -112,6 +113,32 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
     setProposal(null);
   }, [sessionId]);
 
+  // Defense in depth against a cross-session state leak: abort any in-flight
+  // stream request when this pane unmounts or the sessionId it's bound to
+  // changes, so a late chunk/done/error event from an old session's request
+  // can never setState into a pane now showing a different session (the
+  // parent also remounts this component via `key={sessionId}`, but that
+  // alone doesn't stop the superseded fetch from running to completion).
+  useEffect(() => {
+    return () => {
+      controllerRef.current?.abort();
+    };
+  }, [sessionId]);
+
+  // Clear the optimistic user bubble only once the refetched, server-
+  // persisted messages list actually contains it (mirrors BoardChat's
+  // pattern) — clearing eagerly in the send `finally` causes the bubble to
+  // flash away before the refetch repopulates it, leaving a visible gap.
+  useEffect(() => {
+    if (!optimisticMessage) return;
+    const hasPersisted = (messages ?? []).some(
+      (m) => m.role === "user" && m.body === optimisticMessage,
+    );
+    if (hasPersisted) {
+      setOptimisticMessage(null);
+    }
+  }, [messages, optimisticMessage]);
+
   const toggleContextMutation = useMutation({
     mutationFn: ({ id, excluded }: { id: string; excluded: boolean }) =>
       refineryApi.toggleContext(id, excluded),
@@ -139,8 +166,13 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
       setErrorText("");
       setStatusText("Connecting...");
 
+      // Abort any still-running request from a prior send before starting a
+      // new one — only one stream should ever be live for this pane.
+      controllerRef.current?.abort();
+      const controller = new AbortController();
+      controllerRef.current = controller;
+
       try {
-        const controller = new AbortController();
         const fetchTimeout = setTimeout(() => controller.abort(), 130000);
         const res = await fetch(`/api/refinery/sessions/${sessionId}/chat/stream`, {
           method: "POST",
@@ -207,8 +239,13 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
           "The refinery assistant is unavailable right now. Please try again in a moment.",
         );
       } finally {
+        if (controllerRef.current === controller) {
+          controllerRef.current = null;
+        }
         setSending(false);
-        setOptimisticMessage(null);
+        // Note: optimisticMessage is intentionally NOT cleared here — see the
+        // effect above, which clears it once the refetched messages list
+        // actually contains the persisted message (mirrors BoardChat).
         composerRef.current?.focus();
       }
     },

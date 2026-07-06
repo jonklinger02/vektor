@@ -264,7 +264,12 @@ export function Refinery() {
 
       <main className="min-h-0 flex-1">
         {selectedSessionId ? (
-          <RefineryChatPane sessionId={selectedSessionId} />
+          // `key` forces a fresh RefineryChatPane instance per session so a
+          // stale in-flight stream from the previously-selected session can
+          // never repaint the newly-selected one (see also the pane's own
+          // AbortController cleanup, which handles the same hazard for
+          // unmount/session-change without relying on a remount).
+          <RefineryChatPane key={selectedSessionId} sessionId={selectedSessionId} />
         ) : (
           <div className="flex h-full items-center justify-center">
             <EmptyState
