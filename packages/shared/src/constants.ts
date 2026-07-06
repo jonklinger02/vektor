@@ -199,6 +199,8 @@ export const INBOX_MINE_ISSUE_STATUS_FILTER = INBOX_MINE_ISSUE_STATUSES.join(","
 
 export const ISSUE_PRIORITIES = ["critical", "high", "medium", "low"] as const;
 export type IssuePriority = (typeof ISSUE_PRIORITIES)[number];
+export const ISSUE_IMPORTANCE = ["important", "not_important"] as const;
+export type IssueImportance = (typeof ISSUE_IMPORTANCE)[number];
 export const ISSUE_WORK_MODES = ["standard", "ask", "planning"] as const;
 export type IssueWorkMode = (typeof ISSUE_WORK_MODES)[number];
 export const MAX_ISSUE_REQUEST_DEPTH = 1024;
