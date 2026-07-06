@@ -81,4 +81,18 @@ describe("createStreamingSignalStripper", () => {
     out += stripper.flush();
     expect(out).toBe("50%% done");
   });
+
+  it("flush() drops a trailing partial-marker prefix instead of leaking it", () => {
+    const s = createStreamingSignalStripper();
+    const a = s.push("hello ");
+    const b = s.push("%%ACTI");
+    const out = a + b + s.flush();
+    expect(out).toBe("hello ");
+    expect(out).not.toContain("%%ACTI");
+
+    // The already-correct complete-open, unterminated-block case still holds.
+    const s2 = createStreamingSignalStripper();
+    const out2 = s2.push('before %%ACTIONS%%{"partial') + s2.flush();
+    expect(out2).toBe("before ");
+  });
 });

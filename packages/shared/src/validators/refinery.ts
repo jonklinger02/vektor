@@ -110,7 +110,9 @@ export function createStreamingSignalStripper() {
       return safe;
     },
     flush(): string {
-      const out = buf.replace(/%%ACTIONS%%[\s\S]*$/, "");
+      let out = buf.replace(/%%ACTIONS%%[\s\S]*$/, "");
+      const hold = partialMarkerHoldback(out, SIGNAL_OPEN);
+      if (hold) out = out.slice(0, out.length - hold);
       buf = "";
       return out;
     },
