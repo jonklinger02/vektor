@@ -286,6 +286,11 @@ export const queryKeys = {
   liveRuns: (companyId: string) => ["live-runs", companyId] as const,
   runIssues: (runId: string) => ["run-issues", runId] as const,
   org: (companyId: string) => ["org", companyId] as const,
+  refinery: {
+    sessions: () => ["refinery", "sessions"] as const,
+    messages: (sessionId: string) => ["refinery", "messages", sessionId] as const,
+    models: () => ["refinery", "models"] as const,
+  },
   skills: {
     available: ["skills", "available"] as const,
   },
