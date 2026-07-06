@@ -14,6 +14,7 @@ import type { RefinerySession } from "@paperclipai/shared";
 import { refineryApi } from "../api/refinery";
 import { queryKeys } from "../lib/queryKeys";
 import { EmptyState } from "../components/EmptyState";
+import { RefineryChatPane } from "../components/RefineryChatPane";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "../lib/utils";
@@ -21,7 +22,7 @@ import { cn } from "../lib/utils";
 // Refinery: a private, un-company-scoped workspace where a user chats with a
 // model to shape an idea before "finalizing" it into a task/goal/project.
 // This page owns the sessions sidebar (list, create, rename, archive) and a
-// selection state; the chat pane itself is a Task 10 stub.
+// selection state; the chat pane itself is RefineryChatPane (Task 10).
 
 const FINALIZED_LINK: Record<string, (session: RefinerySession) => string | null> = {
   task: (s) => (s.finalizedEntityId ? `/issues/${s.finalizedEntityId}` : null),
@@ -263,7 +264,7 @@ export function Refinery() {
 
       <main className="min-h-0 flex-1">
         {selectedSessionId ? (
-          <div data-testid="refinery-chat-pane" data-session-id={selectedSessionId} className="h-full" />
+          <RefineryChatPane sessionId={selectedSessionId} />
         ) : (
           <div className="flex h-full items-center justify-center">
             <EmptyState
