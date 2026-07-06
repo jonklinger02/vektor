@@ -33,6 +33,7 @@ import { ApprovalDetail } from "./pages/ApprovalDetail";
 import { Costs } from "./pages/Costs";
 import { Activity } from "./pages/Activity";
 import { Inbox } from "./pages/Inbox";
+import { Refinery } from "./pages/Refinery";
 import { BoardChat } from "./pages/BoardChat";
 import { CompanySettings } from "./pages/CompanySettings";
 import { CompanyEnvironments } from "./pages/CompanyEnvironments";
@@ -425,6 +426,7 @@ export function App() {
           <Route path="skills/*" element={<UnprefixedBoardRedirect />} />
           <Route path="settings" element={<LegacySettingsRedirect />} />
           <Route path="settings/*" element={<LegacySettingsRedirect />} />
+          <Route path="refinery" element={<Refinery />} />
           <Route path="agents" element={<UnprefixedBoardRedirect />} />
           <Route path="agents/new" element={<UnprefixedBoardRedirect />} />
           <Route path="agents/:agentId" element={<UnprefixedBoardRedirect />} />
