@@ -543,7 +543,7 @@ export interface Issue {
   status: IssueStatus;
   workMode: IssueWorkMode;
   priority: IssuePriority;
-  importance: IssueImportance | null;
+  importance?: IssueImportance | null;
   assigneeAgentId: string | null;
   assigneeUserId: string | null;
   checkoutRunId: string | null;
