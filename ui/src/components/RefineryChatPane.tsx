@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { EyeOff, Eye, FlaskConical, MoreHorizontal, ScanEye } from "lucide-react";
+import { EyeOff, Eye, FlaskConical, MoreHorizontal, ScanEye, Sparkles } from "lucide-react";
 import type { RefineryMessage, RefineryProposal } from "@paperclipai/shared";
 import { stripRefinerySignals } from "@paperclipai/shared";
+import { Link } from "@/lib/router";
 import { refineryApi } from "../api/refinery";
 import { queryKeys } from "../lib/queryKeys";
 import { MarkdownBody } from "./MarkdownBody";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import { RefineryContextDrawer } from "./RefineryContextDrawer";
+import { RefineryProposalCard } from "./RefineryProposalCard";
 import {
   Select,
   SelectContent,
@@ -53,6 +55,16 @@ const REFINERY_MARKDOWN_CLASS =
 
 const REFINERY_MODEL_STORAGE_KEY = "paperclip.refineryModel";
 
+const FINALIZE_MESSAGE =
+  "Please finalize: emit the proposal signal for the plan as refined so far.";
+
+/** Where the finalized-entity success chip should link, by proposal kind. */
+const FINALIZED_ENTITY_LINK: Record<string, (entityId: string) => string> = {
+  task: (entityId) => `/issues/${entityId}`,
+  project: (entityId) => `/projects/${entityId}`,
+  goal: () => "/goals",
+};
+
 function readStoredModel(): string | null {
   try {
     return localStorage.getItem(REFINERY_MODEL_STORAGE_KEY);
@@ -85,6 +97,9 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
   const [statusText, setStatusText] = useState("");
   const [errorText, setErrorText] = useState("");
   const [proposal, setProposal] = useState<RefineryProposal | null>(null);
+  const [finalizedChip, setFinalizedChip] = useState<
+    { kind: string; entityId: string; companyId: string } | null
+  >(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(() => readStoredModel());
   const [contextDrawerOpen, setContextDrawerOpen] = useState(false);
 
@@ -131,6 +146,7 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
     setStatusText("");
     setErrorText("");
     setProposal(null);
+    setFinalizedChip(null);
   }, [sessionId]);
 
   // Defense in depth against a cross-session state leak: abort any in-flight
@@ -320,6 +336,18 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
         <div className="flex shrink-0 items-center gap-2">
           <Button
             type="button"
+            variant="outline"
+            size="sm"
+            data-testid="refinery-finalize-button"
+            title="Ask the assistant to emit a proposal for the plan as refined so far"
+            disabled={sending || !selectedModel}
+            onClick={() => void sendMessage(FINALIZE_MESSAGE)}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Finalize
+          </Button>
+          <Button
+            type="button"
             variant="ghost"
             size="icon-sm"
             aria-label="Inspect context"
@@ -466,11 +494,30 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
           )}
 
           {proposal && (
+            <RefineryProposalCard
+              proposal={proposal}
+              sessionId={sessionId}
+              onDone={(created) => {
+                setProposal(null);
+                setFinalizedChip(created);
+                queryClient.invalidateQueries({ queryKey: queryKeys.refinery.sessions() });
+              }}
+              onDismiss={() => setProposal(null)}
+            />
+          )}
+
+          {finalizedChip && (
             <div
-              data-testid="refinery-proposal-placeholder"
-              className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground"
+              data-testid="refinery-finalized-success-chip"
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
             >
-              Proposal ready: {proposal.title} ({proposal.kind})
+              <span>Created a {finalizedChip.kind}.</span>
+              <Link
+                to={FINALIZED_ENTITY_LINK[finalizedChip.kind]?.(finalizedChip.entityId) ?? "#"}
+                className="font-medium text-foreground hover:underline"
+              >
+                View it →
+              </Link>
             </div>
           )}
         </div>
