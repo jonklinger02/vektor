@@ -14,7 +14,8 @@ import type { RefinerySession } from "@paperclipai/shared";
 import { refineryApi } from "../api/refinery";
 import { queryKeys } from "../lib/queryKeys";
 import { EmptyState } from "../components/EmptyState";
-import { RefineryChatPane } from "../components/RefineryChatPane";
+import { RefineryChatPane, resolveFinalizedEntityHref } from "../components/RefineryChatPane";
+import { useCompany } from "../context/CompanyContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "../lib/utils";
@@ -43,6 +44,7 @@ function SessionRow({
   onRename,
   onArchive,
   onRestore,
+  companies,
 }: {
   session: RefinerySession;
   selected: boolean;
@@ -50,11 +52,22 @@ function SessionRow({
   onRename: (title: string) => void;
   onArchive: () => void;
   onRestore: () => void;
+  companies: Array<{ id: string; issuePrefix: string }>;
   }) {
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(session.title);
   const archived = session.status === "archived";
-  const finalizedHref = finalizedLinkFor(session);
+
+  const finalizedHref = session.finalizedKind && session.finalizedEntityId && session.finalizedCompanyId
+    ? resolveFinalizedEntityHref(
+        {
+          kind: session.finalizedKind,
+          entityId: session.finalizedEntityId,
+          companyId: session.finalizedCompanyId,
+        },
+        companies,
+      )
+    : null;
 
   function commitRename() {
     const trimmed = draftTitle.trim();
@@ -141,6 +154,7 @@ function SessionRow({
 
 export function Refinery() {
   const queryClient = useQueryClient();
+  const { companies } = useCompany();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
@@ -219,6 +233,7 @@ export function Refinery() {
                   onRestore={() =>
                     updateMutation.mutate({ id: session.id, data: { status: "active" } })
                   }
+                  companies={companies}
                 />
               ))}
             </ul>
@@ -253,6 +268,7 @@ export function Refinery() {
                       onRestore={() =>
                         updateMutation.mutate({ id: session.id, data: { status: "active" } })
                       }
+                      companies={companies}
                     />
                   ))}
                 </ul>

@@ -11,6 +11,10 @@ import { Refinery } from "./Refinery";
 const companyState = vi.hoisted(() => ({
   selectedCompanyId: "company-1",
   selectedCompany: { id: "company-1", name: "Acme Robotics", issuePrefix: "PAP" },
+  companies: [
+    { id: "company-1", name: "Acme Robotics", issuePrefix: "PAP" },
+    { id: "company-2", name: "Beta Corp", issuePrefix: "BETA" },
+  ],
 }));
 
 const refineryApiMock = vi.hoisted(() => ({
@@ -192,6 +196,31 @@ describe("Refinery page", () => {
       const chip = container.querySelector('[data-testid="refinery-finalized-chip-session-c"]');
       expect(chip).not.toBeNull();
       expect(chip?.getAttribute("href")).toBe("/PAP/issues/task-123");
+    });
+
+    flushSync(() => {
+      root.unmount();
+    });
+  });
+
+  it("uses the finalized company's prefix for cross-company finalized links", async () => {
+    const finalized = session({
+      id: "session-d",
+      title: "Cross-company task",
+      status: "finalized",
+      finalizedKind: "task",
+      finalizedEntityId: "task-456",
+      finalizedCompanyId: "company-2", // Different from ambient company-1
+    });
+    refineryApiMock.listSessions.mockResolvedValue([finalized]);
+
+    const { root } = renderRefinery(container);
+
+    await waitForAssertion(() => {
+      const chip = container.querySelector('[data-testid="refinery-finalized-chip-session-d"]');
+      expect(chip).not.toBeNull();
+      // Should use company-2's prefix (BETA), not the ambient company-1's prefix (PAP)
+      expect(chip?.getAttribute("href")).toBe("/BETA/issues/task-456");
     });
 
     flushSync(() => {
