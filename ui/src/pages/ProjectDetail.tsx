@@ -21,6 +21,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { ProjectTile } from "../components/ProjectTile";
 import { BudgetPolicyCard } from "../components/BudgetPolicyCard";
 import { IssuesList } from "../components/IssuesList";
+import { ProjectBoardView } from "../components/board/ProjectBoardView";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { PageTabBar } from "../components/PageTabBar";
 import { ProjectWorkspacesContent } from "../components/ProjectWorkspacesContent";
@@ -44,7 +45,7 @@ import {
 
 /* ── Top-level tab types ── */
 
-type ProjectBaseTab = "overview" | "list" | "plugin-operations" | "workspaces" | "configuration" | "budget";
+type ProjectBaseTab = "overview" | "list" | "board" | "plugin-operations" | "workspaces" | "configuration" | "budget";
 type ProjectPluginTab = `plugin:${string}`;
 type ProjectTab = ProjectBaseTab | ProjectPluginTab;
 
@@ -61,6 +62,7 @@ function resolveProjectTab(pathname: string, projectId: string): ProjectTab | nu
   if (tab === "configuration") return "configuration";
   if (tab === "budget") return "budget";
   if (tab === "issues") return "list";
+  if (tab === "board") return "board";
   if (tab === "plugin-operations") return "plugin-operations";
   if (tab === "workspaces") return "workspaces";
   return null;
@@ -533,6 +535,10 @@ export function ProjectDetail() {
       navigate(`/projects/${canonicalProjectRef}/workspaces`, { replace: true });
       return;
     }
+    if (activeTab === "board") {
+      navigate(`/projects/${canonicalProjectRef}/board`, { replace: true });
+      return;
+    }
     if (activeTab === "list") {
       if (filter) {
         navigate(`/projects/${canonicalProjectRef}/issues/${filter}`, { replace: true });
@@ -716,6 +722,8 @@ export function ProjectDetail() {
       navigate(`/projects/${canonicalProjectRef}/plugin-operations`);
     } else if (tab === "configuration") {
       navigate(`/projects/${canonicalProjectRef}/configuration`);
+    } else if (tab === "board") {
+      navigate(`/projects/${canonicalProjectRef}/board`);
     } else {
       navigate(`/projects/${canonicalProjectRef}/issues`);
     }
@@ -823,6 +831,7 @@ export function ProjectDetail() {
         <PageTabBar
           items={[
             { value: "list", label: "Tasks" },
+            { value: "board", label: "Board" },
             { value: "overview", label: "Overview" },
             ...(project.managedByPlugin ? [{ value: "plugin-operations", label: "Plugin operations" }] : []),
             ...(showWorkspacesTab ? [{ value: "workspaces", label: "Workspaces" }] : []),
@@ -852,6 +861,10 @@ export function ProjectDetail() {
 
       {activeTab === "list" && project?.id && resolvedCompanyId && (
         <ProjectIssuesList projectId={project.id} companyId={resolvedCompanyId} />
+      )}
+
+      {activeTab === "board" && project?.id && resolvedCompanyId && (
+        <ProjectBoardView projectId={project.id} companyId={resolvedCompanyId} />
       )}
 
       {activeTab === "plugin-operations" && project?.id && resolvedCompanyId && project.managedByPlugin && (
