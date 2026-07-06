@@ -124,7 +124,9 @@ export function RefineryProposalCard({
       if (existing && existing.kind === kind && existing.companyId === companyId) {
         // A prior attempt already created the entity — recordFinalized must
         // have thrown after that. Skip the create call so retrying never
-        // double-creates, and go straight to (re)recording finalization.
+        // double-creates, and go straight to (re)recording finalization. Note:
+        // on retry, the already-created entity is reused; title/description/
+        // priority edits made after the first successful create are ignored.
         entityId = existing.entityId;
       } else if (kind === "task") {
         const created = await issuesApi.create(companyId, {

@@ -6,7 +6,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RefineryChatPane } from "./RefineryChatPane";
+import { RefineryChatPane, resolveFinalizedEntityHref } from "./RefineryChatPane";
 
 /**
  * Task 10 coverage: SSE streaming into the transcript (with defensive signal
@@ -916,5 +916,84 @@ describe("RefineryChatPane", () => {
       expect(rows[2].getAttribute("data-context-excluded")).toBe("true"); // m3 now excluded
       expect(rows[3].getAttribute("data-context-excluded")).toBe("true"); // m4 now excluded
     });
+  });
+});
+
+describe("resolveFinalizedEntityHref", () => {
+  /**
+   * Unit tests for the finalized-chip href resolution. This function
+   * resolves against the company explicitly chosen in the proposal card,
+   * NOT the app's ambient `selectedCompanyId`. This test suite proves that
+   * the chosen company's prefix wins over an ambient one — closing a bug
+   * where finalizing into a non-active company produced a link under the
+   * wrong company.
+   */
+
+  it("builds an issue link using the CHOSEN company's prefix, not an ambient one", () => {
+    const companies = [
+      { id: "c-chosen", issuePrefix: "CHO" },
+      { id: "c-ambient", issuePrefix: "AMB" },
+    ];
+    const chip = { kind: "task", entityId: "t-1", companyId: "c-chosen" };
+
+    const href = resolveFinalizedEntityHref(chip, companies);
+
+    expect(href).toBe("/CHO/issues/t-1");
+    expect(href).not.toContain("AMB");
+  });
+
+  it("builds a project link using the CHOSEN company's prefix", () => {
+    const companies = [
+      { id: "c-chosen", issuePrefix: "PROJ" },
+      { id: "c-other", issuePrefix: "OTHER" },
+    ];
+    const chip = { kind: "project", entityId: "p-42", companyId: "c-chosen" };
+
+    const href = resolveFinalizedEntityHref(chip, companies);
+
+    expect(href).toBe("/PROJ/projects/p-42");
+  });
+
+  it("handles goal kind (which has no per-entity path) with the chosen company's prefix", () => {
+    const companies = [
+      { id: "c-chosen", issuePrefix: "GOAL" },
+    ];
+    const chip = { kind: "goal", entityId: "g-999", companyId: "c-chosen" };
+
+    const href = resolveFinalizedEntityHref(chip, companies);
+
+    expect(href).toBe("/GOAL/goals");
+  });
+
+  it("returns bare path when chip.companyId is not found in companies list", () => {
+    const companies = [
+      { id: "c-exists", issuePrefix: "EX" },
+    ];
+    const chip = { kind: "task", entityId: "t-missing", companyId: "c-not-found" };
+
+    const href = resolveFinalizedEntityHref(chip, companies);
+
+    expect(href).toBe("/issues/t-missing");
+  });
+
+  it("returns bare path when companies list is empty", () => {
+    const companies: Array<{ id: string; issuePrefix: string }> = [];
+    const chip = { kind: "project", entityId: "p-123", companyId: "c-any" };
+
+    const href = resolveFinalizedEntityHref(chip, companies);
+
+    expect(href).toBe("/projects/p-123");
+  });
+
+  it("returns bare # (still prefixed with company if found) for unknown chip.kind", () => {
+    const companies = [
+      { id: "c-chosen", issuePrefix: "UNK" },
+    ];
+    const chip = { kind: "unknown", entityId: "u-1", companyId: "c-chosen" };
+
+    const href = resolveFinalizedEntityHref(chip, companies);
+
+    // Unknown kind → bare "#", but still prefixed with company if found
+    expect(href).toBe("/UNK#");
   });
 });

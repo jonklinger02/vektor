@@ -81,7 +81,7 @@ const FINALIZED_ENTITY_LINK: Record<string, (entityId: string) => string> = {
  * Looking up the target company's own `issuePrefix` and prefixing the path
  * directly sidesteps that without any global-state side effects.
  */
-function resolveFinalizedEntityHref(
+export function resolveFinalizedEntityHref(
   chip: { kind: string; entityId: string; companyId: string },
   companies: Array<{ id: string; issuePrefix: string }>,
 ): string {
