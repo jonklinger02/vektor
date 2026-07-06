@@ -57,6 +57,9 @@ const HTTP_METHODS = new Set(["get", "put", "post", "delete", "options", "head",
 const explicitOpenApiCoverageExclusions = new Set([
   // Pipeline routes are experimental and not yet represented in the public OpenAPI document.
   "pipelines.ts",
+  // Refinery routes are an internal, UI-driven surface (chat-to-work-item intake)
+  // and are not part of the public OpenAPI document.
+  "refinery.ts",
 ]);
 
 function createApp() {
