@@ -382,7 +382,7 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
                     {message.body ?? ""}
                   </div>
                 )}
-                <div className="mt-2 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                <div className={cn("mt-2 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100", message.contextExcluded && "opacity-100")}>
                   <button
                     type="button"
                     aria-label={message.contextExcluded ? "Include in context" : "Exclude from context"}

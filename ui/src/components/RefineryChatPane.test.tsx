@@ -795,4 +795,126 @@ describe("RefineryChatPane", () => {
     expect(charCount?.textContent).toContain(String(expectedChars));
     expect(charCount?.textContent).toContain("2 messages");
   });
+
+  it("excludes a range from a range-menu action, skipping already-excluded messages", async () => {
+    refineryApiMock.listMessages
+      .mockReset()
+      .mockResolvedValueOnce([
+        {
+          id: "m1",
+          sessionId: "session-1",
+          role: "user",
+          body: "Message 1",
+          model: null,
+          contextExcluded: false,
+          createdAt: "2026-07-01T00:00:00.000Z",
+        },
+        {
+          id: "m2",
+          sessionId: "session-1",
+          role: "assistant",
+          body: "Message 2 (already excluded)",
+          model: "model-a",
+          contextExcluded: true,
+          createdAt: "2026-07-01T00:00:01.000Z",
+        },
+        {
+          id: "m3",
+          sessionId: "session-1",
+          role: "assistant",
+          body: "Message 3",
+          model: "model-a",
+          contextExcluded: false,
+          createdAt: "2026-07-01T00:00:02.000Z",
+        },
+        {
+          id: "m4",
+          sessionId: "session-1",
+          role: "assistant",
+          body: "Message 4",
+          model: "model-a",
+          contextExcluded: false,
+          createdAt: "2026-07-01T00:00:03.000Z",
+        },
+      ])
+      // Refetch triggered by the range mutation's onSuccess invalidate.
+      .mockResolvedValueOnce([
+        {
+          id: "m1",
+          sessionId: "session-1",
+          role: "user",
+          body: "Message 1",
+          model: null,
+          contextExcluded: false,
+          createdAt: "2026-07-01T00:00:00.000Z",
+        },
+        {
+          id: "m2",
+          sessionId: "session-1",
+          role: "assistant",
+          body: "Message 2 (already excluded)",
+          model: "model-a",
+          contextExcluded: true,
+          createdAt: "2026-07-01T00:00:01.000Z",
+        },
+        {
+          id: "m3",
+          sessionId: "session-1",
+          role: "assistant",
+          body: "Message 3",
+          model: "model-a",
+          contextExcluded: true,
+          createdAt: "2026-07-01T00:00:02.000Z",
+        },
+        {
+          id: "m4",
+          sessionId: "session-1",
+          role: "assistant",
+          body: "Message 4",
+          model: "model-a",
+          contextExcluded: true,
+          createdAt: "2026-07-01T00:00:03.000Z",
+        },
+      ]);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse([])));
+
+    const { root } = renderPane(container);
+    unmounts.push(root);
+
+    await waitForAssertion(() => {
+      expect(container.querySelectorAll('[data-testid="refinery-message-row"]').length).toBe(4);
+    });
+
+    // Verify initial state: m2 is already excluded
+    const messageRows = container.querySelectorAll('[data-testid="refinery-message-row"]');
+    expect(messageRows[1].getAttribute("data-context-excluded")).toBe("true");
+
+    // Find the "Exclude from here down" button for the 2nd message (m2, index 1)
+    const secondMessageRow = messageRows[1] as HTMLElement;
+    const excludeDownButtons = Array.from(secondMessageRow.querySelectorAll("button")).filter(
+      (btn) => btn.textContent === "Exclude from here down",
+    );
+    expect(excludeDownButtons.length).toBe(1);
+
+    const excludeDownButton = excludeDownButtons[0] as HTMLButtonElement;
+
+    await act(async () => {
+      excludeDownButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flush();
+    });
+
+    // Should call toggleContext only for m3 and m4 (m2 is already excluded, so skipped)
+    expect(refineryApiMock.toggleContext).toHaveBeenCalledWith("m3", true);
+    expect(refineryApiMock.toggleContext).toHaveBeenCalledWith("m4", true);
+    expect(refineryApiMock.toggleContext).toHaveBeenCalledTimes(2);
+    // Should NOT call for m2 since it's already excluded
+    expect(refineryApiMock.toggleContext).not.toHaveBeenCalledWith("m2", true);
+
+    await waitForAssertion(() => {
+      const rows = container.querySelectorAll('[data-testid="refinery-message-row"]');
+      expect(rows[2].getAttribute("data-context-excluded")).toBe("true"); // m3 now excluded
+      expect(rows[3].getAttribute("data-context-excluded")).toBe("true"); // m4 now excluded
+    });
+  });
 });
