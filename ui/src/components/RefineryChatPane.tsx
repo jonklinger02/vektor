@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { EyeOff, Eye, FlaskConical } from "lucide-react";
-import type { RefineryProposal } from "@paperclipai/shared";
+import type { RefineryMessage, RefineryProposal } from "@paperclipai/shared";
 import { stripRefinerySignals } from "@paperclipai/shared";
 import { refineryApi } from "../api/refinery";
 import { queryKeys } from "../lib/queryKeys";
@@ -126,15 +126,24 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
   }, [sessionId]);
 
   // Clear the optimistic user bubble only once the refetched, server-
-  // persisted messages list actually contains it (mirrors BoardChat's
-  // pattern) — clearing eagerly in the send `finally` causes the bubble to
-  // flash away before the refetch repopulates it, leaving a visible gap.
+  // persisted messages list actually contains it as the MOST RECENT user
+  // message (mirrors BoardChat's pattern) — clearing eagerly in the send
+  // `finally` causes the bubble to flash away before the refetch repopulates
+  // it, leaving a visible gap. Matching against the whole list (rather than
+  // just the last user message) false-positives when the sent text
+  // duplicates an earlier message (e.g. "yes"/"continue" in an iterative
+  // chat), clearing the bubble early against the stale pre-refetch cache.
   useEffect(() => {
     if (!optimisticMessage) return;
-    const hasPersisted = (messages ?? []).some(
-      (m) => m.role === "user" && m.body === optimisticMessage,
-    );
-    if (hasPersisted) {
+    const list = messages ?? [];
+    let lastUser: RefineryMessage | undefined;
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].role === "user") {
+        lastUser = list[i];
+        break;
+      }
+    }
+    if (lastUser?.body === optimisticMessage) {
       setOptimisticMessage(null);
     }
   }, [messages, optimisticMessage]);
@@ -233,6 +242,7 @@ export function RefineryChatPane({ sessionId }: RefineryChatPaneProps) {
         setStreamingText("");
         setStatusText("");
       } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return; // intentional abort — not a failure
         console.error("Refinery chat error:", err);
         setStatusText("");
         setErrorText(

@@ -466,4 +466,170 @@ describe("RefineryChatPane", () => {
       expect(countBubbles("New idea to refine")).toBe(1);
     });
   });
+
+  it("does not early-clear the optimistic bubble when the sent text duplicates an EARLIER (non-last) user message", async () => {
+    // Session history already contains a prior "yes" from earlier in the
+    // conversation, followed by a *different* most-recent user message
+    // ("continue"). Sending "yes" again must not be false-matched against
+    // that earlier duplicate while the refetch is still pending — only the
+    // *last* user message should ever be compared against the optimistic
+    // text.
+    let resolveRefetchedMessages: (value: unknown[]) => void = () => {};
+    refineryApiMock.listMessages
+      .mockReset()
+      .mockResolvedValueOnce([
+        {
+          id: "m0",
+          sessionId: "session-1",
+          role: "user",
+          body: "yes",
+          model: null,
+          contextExcluded: false,
+          createdAt: "2026-07-01T00:00:00.000Z",
+        },
+        {
+          id: "m1",
+          sessionId: "session-1",
+          role: "user",
+          body: "continue",
+          model: null,
+          contextExcluded: false,
+          createdAt: "2026-07-01T00:00:01.000Z",
+        },
+      ]) // initial mount fetch — history already has "yes" earlier, "continue" last
+      .mockImplementationOnce(
+        () => new Promise((resolve) => { resolveRefetchedMessages = resolve; }),
+      ); // refetch triggered by the `done` event's invalidateQueries
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue(mockFetchResponse([JSON.stringify({ type: "done", proposal: null })]));
+
+    function countBubbles(text: string): number {
+      return Array.from(container.querySelectorAll("div")).filter(
+        (el) => el.children.length === 0 && el.textContent === text,
+      ).length;
+    }
+
+    const { root } = renderPane(container);
+    unmounts.push(root);
+
+    await waitForAssertion(() => {
+      expect(container.querySelector('[data-testid="refinery-model-select"]')).not.toBeNull();
+    });
+
+    // Sanity: the earlier duplicate "yes" from history is already rendered.
+    await waitForAssertion(() => {
+      expect(countBubbles("yes")).toBe(1);
+    });
+
+    const textarea = container.querySelector('[data-testid="chat-composer-input"]') as HTMLTextAreaElement;
+    flushSync(() => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      nativeSetter.call(textarea, "yes");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await waitForAssertion(() => {
+      const sendButton = container.querySelector('[data-testid="chat-composer-send"]') as HTMLButtonElement;
+      expect(sendButton.disabled).toBe(false);
+    });
+
+    const sendButton = container.querySelector('[data-testid="chat-composer-send"]') as HTMLButtonElement;
+    await act(async () => {
+      sendButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flush();
+    });
+
+    // The stream has completed (`done` fired) but the refetch of the
+    // messages query hasn't resolved yet. The list still only has the
+    // EARLIER "yes" (m0) as a persisted message, not the new one — so the
+    // optimistic bubble for the new send must still be showing, giving two
+    // "yes" bubbles total (m0's persisted bubble + the optimistic one). The
+    // whole-list-scan bug would false-match against m0 and clear the
+    // optimistic bubble immediately, collapsing this to one.
+    await waitForAssertion(() => {
+      expect(countBubbles("yes")).toBe(2);
+    });
+
+    // Now let the refetch resolve with the persisted, server-side message —
+    // the NEW "yes" lands as the last user message.
+    resolveRefetchedMessages([
+      {
+        id: "m0",
+        sessionId: "session-1",
+        role: "user",
+        body: "yes",
+        model: null,
+        contextExcluded: false,
+        createdAt: "2026-07-01T00:00:00.000Z",
+      },
+      {
+        id: "m1",
+        sessionId: "session-1",
+        role: "user",
+        body: "continue",
+        model: null,
+        contextExcluded: false,
+        createdAt: "2026-07-01T00:00:01.000Z",
+      },
+      {
+        id: "m2",
+        sessionId: "session-1",
+        role: "user",
+        body: "yes",
+        model: null,
+        contextExcluded: false,
+        createdAt: "2026-07-01T00:00:02.000Z",
+      },
+    ]);
+
+    // Settles to exactly two "yes" bubbles (m0 + the newly-persisted m2),
+    // with the optimistic one correctly handed off — never three (which
+    // would mean it never cleared), never one (which would mean it cleared
+    // too early or the new message didn't render).
+    await waitForAssertion(() => {
+      expect(countBubbles("yes")).toBe(2);
+    });
+  });
+
+  it("swallows an intentional AbortError silently — no error banner, no console.error", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockRejectedValue(new DOMException("The user aborted a request.", "AbortError"));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { root } = renderPane(container);
+    unmounts.push(root);
+
+    await waitForAssertion(() => {
+      expect(container.querySelector('[data-testid="refinery-model-select"]')).not.toBeNull();
+    });
+
+    const textarea = container.querySelector('[data-testid="chat-composer-input"]') as HTMLTextAreaElement;
+    flushSync(() => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      nativeSetter.call(textarea, "Aborted send");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await waitForAssertion(() => {
+      const sendButton = container.querySelector('[data-testid="chat-composer-send"]') as HTMLButtonElement;
+      expect(sendButton.disabled).toBe(false);
+    });
+
+    const sendButton = container.querySelector('[data-testid="chat-composer-send"]') as HTMLButtonElement;
+    await act(async () => {
+      sendButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flush();
+    });
+
+    // `sending` still clears via `finally` even though the catch returned early.
+    await waitForAssertion(() => {
+      const sendButton2 = container.querySelector('[data-testid="chat-composer-send"]') as HTMLButtonElement;
+      expect(sendButton2.disabled).toBe(false);
+    });
+
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith("Refinery chat error:", expect.anything());
+    consoleErrorSpy.mockRestore();
+  });
 });
