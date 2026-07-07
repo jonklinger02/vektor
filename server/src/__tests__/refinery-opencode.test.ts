@@ -130,4 +130,39 @@ describe("listRefineryModels", () => {
     // Custom provider's label wins (added before built-ins)
     expect(matches[0].label).toBe("Custom GPT-OSS 20B (Custom Ollama Cloud)");
   });
+
+  it("appends env-driven extra models (Claude subscription case) with label/tier defaults", () => {
+    const models = listRefineryModels({
+      PAPERCLIP_REFINERY_EXTRA_MODELS: JSON.stringify([
+        { id: "anthropic/claude-opus-4-8", label: "Claude Opus 4.8", tier: "frontier" },
+        { id: "anthropic/claude-haiku-4-5" }, // label + tier default
+        { label: "no id — skipped" },
+      ]),
+    } as NodeJS.ProcessEnv);
+    const opus = models.find((m) => m.id === "anthropic/claude-opus-4-8");
+    expect(opus).toEqual({ id: "anthropic/claude-opus-4-8", label: "Claude Opus 4.8", tier: "frontier" });
+    const haiku = models.find((m) => m.id === "anthropic/claude-haiku-4-5");
+    expect(haiku).toEqual({ id: "anthropic/claude-haiku-4-5", label: "anthropic/claude-haiku-4-5", tier: "standard" });
+    expect(models).toHaveLength(2); // the id-less entry is dropped
+  });
+
+  it("dedups an extra model that collides with a provider/built-in id", () => {
+    const models = listRefineryModels({
+      OLLAMA_API_KEY: "k",
+      PAPERCLIP_REFINERY_EXTRA_MODELS: JSON.stringify([
+        { id: "ollama-cloud/deepseek-v3.1:671b", label: "dup" },
+      ]),
+    } as NodeJS.ProcessEnv);
+    const matches = models.filter((m) => m.id === "ollama-cloud/deepseek-v3.1:671b");
+    expect(matches).toHaveLength(1);
+    expect(matches[0].label).not.toBe("dup"); // built-in added first, wins
+  });
+
+  it("tolerates invalid extra-models JSON without dropping other models", () => {
+    const models = listRefineryModels({
+      OLLAMA_API_KEY: "k",
+      PAPERCLIP_REFINERY_EXTRA_MODELS: "{not an array",
+    } as NodeJS.ProcessEnv);
+    expect(models.some((m) => m.id.startsWith("ollama-cloud/"))).toBe(true);
+  });
 });
